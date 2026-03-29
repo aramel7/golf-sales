@@ -114,6 +114,7 @@ input, select { font-family: inherit; font-size: 14px; }
 
 /* ─── 방 선택 버튼 ───────────────────────────────── */
 .room-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+@media (max-width: 480px) { .room-grid { grid-template-columns: repeat(2, 1fr); } }
 .room-btn { padding: 12px 6px; background: #f5f5f5; border: 2px solid var(--border);
             border-radius: 8px; font-weight: 700; font-size: 14px; color: var(--text);
             transition: all .15s; }
@@ -207,7 +208,8 @@ input, select { font-family: inherit; font-size: 14px; }
 
 /* ─── 모달 ───────────────────────────────────────── */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5);
-                 display: flex; align-items: center; justify-content: center; z-index: 1000; }
+                 display: none; align-items: center; justify-content: center; z-index: 1000; }
+.modal-overlay.active { display: flex; }
 .modal-box { background: var(--card); border-radius: 16px; padding: 28px;
              width: 100%; max-width: 380px; box-shadow: 0 8px 32px rgba(0,0,0,.2); }
 .modal-box h3 { font-size: 16px; font-weight: 700; color: var(--primary); margin-bottom: 20px; }
