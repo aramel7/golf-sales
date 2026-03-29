@@ -31,6 +31,40 @@ async function initDB() {
 
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(date)`);
 
+  // ─── 쿠폰관리 테이블 ──────────────────────────────────────────
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS coupon_members (
+      id         SERIAL PRIMARY KEY,
+      name       VARCHAR(50) NOT NULL,
+      phone      VARCHAR(20) DEFAULT '',
+      gender     VARCHAR(5)  DEFAULT '남',
+      memo       TEXT        DEFAULT '',
+      created_at TIMESTAMP   DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS coupon_tickets (
+      id            SERIAL PRIMARY KEY,
+      member_id     INTEGER NOT NULL REFERENCES coupon_members(id) ON DELETE CASCADE,
+      ticket_type   INTEGER NOT NULL,
+      remaining     INTEGER NOT NULL,
+      purchase_date DATE    NOT NULL,
+      expire_date   DATE    NOT NULL,
+      created_at    TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS coupon_usage_log (
+      id        SERIAL PRIMARY KEY,
+      ticket_id INTEGER NOT NULL REFERENCES coupon_tickets(id)  ON DELETE CASCADE,
+      member_id INTEGER NOT NULL REFERENCES coupon_members(id)  ON DELETE CASCADE,
+      used_date DATE    NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
   // 관리자 계정이 없으면 기본값으로 생성 (admin / golf1234)
   const { rows } = await pool.query('SELECT COUNT(*) FROM users');
   if (parseInt(rows[0].count) === 0) {

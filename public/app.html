@@ -29,6 +29,7 @@
   <button class="nav-tab active" data-tab="dashboard">📋 대시보드</button>
   <button class="nav-tab" data-tab="history">📅 매출내역</button>
   <button class="nav-tab" data-tab="stats">📊 통계</button>
+  <button class="nav-tab" data-tab="coupon">🎫 쿠폰관리</button>
 </nav>
 
 <!-- ═══════════════════════════════════════════ -->
@@ -233,6 +234,86 @@
   </div>
 </section>
 
+<!-- ═══════════════════════════════════════════ -->
+<!-- 쿠폰관리 탭                                  -->
+<!-- ═══════════════════════════════════════════ -->
+<section id="tab-coupon" class="tab-content">
+
+  <div class="coupon-sub-nav">
+    <button class="coupon-sub-tab active" data-sub="members" onclick="switchCouponSub('members')">👥 회원목록</button>
+    <button class="coupon-sub-tab" data-sub="logs" onclick="switchCouponSub('logs')">📋 이용내역</button>
+    <button class="coupon-sub-tab" data-sub="cstats" onclick="switchCouponSub('cstats')">📊 통계</button>
+  </div>
+
+  <!-- 회원목록 -->
+  <div class="coupon-sub-content active" id="coupon-sub-members">
+    <div class="card">
+      <div class="filter-row">
+        <div class="filter-group">
+          <label>회원 검색</label>
+          <input type="text" id="couponSearch" placeholder="이름 또는 연락처"
+                 onkeydown="if(event.key==='Enter')loadCouponMembers()">
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="loadCouponMembers()">🔍 검색</button>
+        <button class="btn btn-success btn-sm" onclick="openCouponMemberModal()">➕ 신규 등록</button>
+        <button class="btn btn-outline btn-sm" onclick="editCouponMember()">✏️ 수정</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteCouponMember()">🗑 삭제</button>
+        <button class="btn btn-sm" style="background:#f9a825;color:#fff;font-weight:700" onclick="openCouponTicketModal()">🎫 이용권 구매</button>
+        <button class="btn btn-sm" style="background:#2e7d32;color:#fff;font-weight:700" onclick="openCouponUseModal()">✅ 이용 처리</button>
+      </div>
+    </div>
+    <div class="card mt-16">
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>ID</th><th>이름</th><th>연락처</th><th>성별</th><th>메모</th>
+              <th>잔여횟수</th><th>최근구매일</th><th>만료일</th>
+            </tr>
+          </thead>
+          <tbody id="couponMemberBody"></tbody>
+        </table>
+      </div>
+      <div id="couponMemberEmpty" class="empty-msg" style="display:none">등록된 회원이 없습니다.</div>
+    </div>
+  </div>
+
+  <!-- 이용내역 -->
+  <div class="coupon-sub-content" id="coupon-sub-logs">
+    <div class="card">
+      <div class="filter-row">
+        <div class="filter-group">
+          <label>회원 검색</label>
+          <input type="text" id="couponLogSearch" placeholder="이름 검색"
+                 onkeydown="if(event.key==='Enter')loadCouponLogs()">
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="loadCouponLogs()">🔍 검색</button>
+        <button class="btn btn-danger btn-sm" onclick="cancelCouponUse()">↩️ 이용 취소</button>
+      </div>
+    </div>
+    <div class="card mt-16">
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>번호</th><th>이용일</th><th>회원명</th><th>연락처</th>
+              <th>이용권</th><th>잔여</th><th>처리시간</th>
+            </tr>
+          </thead>
+          <tbody id="couponLogBody"></tbody>
+        </table>
+      </div>
+      <div id="couponLogEmpty" class="empty-msg" style="display:none">이용 내역이 없습니다.</div>
+    </div>
+  </div>
+
+  <!-- 통계 -->
+  <div class="coupon-sub-content" id="coupon-sub-cstats">
+    <div id="couponStatsBody"></div>
+  </div>
+
+</section>
+
 <!-- ───── 비밀번호 변경 모달 ───── -->
 <div id="pwModal" class="modal-overlay" style="display:none" onclick="closePwModalOnBg(event)">
   <div class="modal-box">
@@ -253,6 +334,88 @@
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closePasswordModal()">취소</button>
       <button class="btn btn-primary" onclick="changePassword()">변경하기</button>
+    </div>
+  </div>
+</div>
+
+<!-- ───── 쿠폰 회원 모달 ───── -->
+<div id="couponMemberModal" class="modal-overlay" style="display:none" onclick="closeCouponMemberModalOnBg(event)">
+  <div class="modal-box">
+    <h3 id="couponMemberModalTitle">신규 회원 등록</h3>
+    <div class="form-group">
+      <label>이름 *</label>
+      <input type="text" id="cmName" placeholder="이름 입력">
+    </div>
+    <div class="form-group">
+      <label>연락처</label>
+      <input type="text" id="cmPhone" placeholder="010-0000-0000">
+    </div>
+    <div class="form-group">
+      <label>성별</label>
+      <select id="cmGender">
+        <option value="남">남</option>
+        <option value="여">여</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>메모</label>
+      <input type="text" id="cmMemo" placeholder="메모 (선택)">
+    </div>
+    <div id="cmError" class="error-msg" style="display:none"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeCouponMemberModal()">취소</button>
+      <button class="btn btn-primary" onclick="saveCouponMember()">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- ───── 이용권 구매 모달 ───── -->
+<div id="couponTicketModal" class="modal-overlay" style="display:none" onclick="closeCouponTicketModalOnBg(event)">
+  <div class="modal-box" style="max-width:440px">
+    <h3>이용권 구매</h3>
+    <p id="ctMemberName" style="font-weight:700;color:var(--primary);margin-bottom:16px"></p>
+    <div class="form-group">
+      <label>이용권 종류</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+        <button class="ticket-type-btn selected" data-type="10" onclick="selectTicketType(10)">10회권 (1개월)</button>
+        <button class="ticket-type-btn" data-type="20" onclick="selectTicketType(20)">20회권 (3개월)</button>
+        <button class="ticket-type-btn" data-type="30" onclick="selectTicketType(30)">30회권 (3개월)</button>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>구매일</label>
+      <input type="date" id="ctPurchaseDate" onchange="updateCouponExpireDisplay()">
+    </div>
+    <div class="form-group">
+      <label>만료일 (자동 계산)</label>
+      <div id="ctExpireDate" style="font-size:15px;font-weight:800;color:var(--cash-label);
+           padding:9px 12px;background:#fff3e0;border-radius:8px;border:1.5px solid #ffcc02"></div>
+    </div>
+    <div id="ctError" class="error-msg" style="display:none"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeCouponTicketModal()">취소</button>
+      <button class="btn btn-primary" onclick="saveCouponTicket()">구매 등록</button>
+    </div>
+  </div>
+</div>
+
+<!-- ───── 이용 처리 모달 ───── -->
+<div id="couponUseModal" class="modal-overlay" style="display:none" onclick="closeCouponUseModalOnBg(event)">
+  <div class="modal-box" style="max-width:480px">
+    <h3>이용 처리</h3>
+    <p id="cuMemberName" style="font-weight:700;color:var(--primary);margin-bottom:16px"></p>
+    <div class="form-group">
+      <label>이용권 선택</label>
+      <select id="cuTicketSelect" style="width:100%"></select>
+    </div>
+    <div class="form-group">
+      <label>이용일</label>
+      <input type="date" id="cuUsedDate">
+    </div>
+    <div id="cuError" class="error-msg" style="display:none"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeCouponUseModal()">취소</button>
+      <button class="btn btn-success" onclick="saveCouponUse()">이용 처리</button>
     </div>
   </div>
 </div>

@@ -95,6 +95,7 @@ function switchTab(tab) {
 
   if (tab === 'history') loadHistory();
   if (tab === 'stats') loadStats();
+  if (tab === 'coupon') loadCouponMembers();
 }
 
 // ─── 방 / 결제수단 선택 ───────────────────────────
@@ -572,3 +573,336 @@ async function changePassword() {
 
 // 날짜 변경 시 해당 날짜 데이터 로드
 document.getElementById('saleDate')?.addEventListener('change', loadDashboard);
+
+// ═══════════════════════════════════════════════════
+// 쿠폰관리
+// ═══════════════════════════════════════════════════
+
+// ─── 상태 ─────────────────────────────────────────
+let couponMembers = [];
+let selectedCouponMemberId = null;
+let couponEditingId = null;
+let couponTicketType = 10;
+let couponLogs = [];
+let couponTickets = [];
+
+// ─── 서브탭 전환 ──────────────────────────────────
+function switchCouponSub(sub) {
+  document.querySelectorAll('.coupon-sub-tab').forEach(t =>
+    t.classList.toggle('active', t.dataset.sub === sub)
+  );
+  document.querySelectorAll('.coupon-sub-content').forEach(c =>
+    c.classList.toggle('active', c.id === `coupon-sub-${sub}`)
+  );
+  if (sub === 'logs') loadCouponLogs();
+  if (sub === 'cstats') loadCouponStats();
+}
+
+// ─── 회원 목록 ────────────────────────────────────
+async function loadCouponMembers() {
+  const search = document.getElementById('couponSearch').value.trim();
+  const url = search
+    ? `/api/coupon/members?search=${encodeURIComponent(search)}`
+    : '/api/coupon/members';
+  const res = await apiFetch(url);
+  if (!res) return;
+  couponMembers = await res.json();
+  renderCouponMembers();
+}
+
+function renderCouponMembers() {
+  const tbody = document.getElementById('couponMemberBody');
+  const empty = document.getElementById('couponMemberEmpty');
+  if (!couponMembers.length) {
+    tbody.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+  const today = getLocalDate();
+  tbody.innerHTML = couponMembers.map(m => {
+    const expired  = m.expire_date && m.expire_date < today;
+    const soon     = m.expire_date && !expired &&
+      (new Date(m.expire_date) - new Date(today)) / 86400000 <= 7;
+    const zero     = parseInt(m.remaining) === 0;
+    const selected = m.id === selectedCouponMemberId;
+    const rowBg    = selected ? 'background:#e3f2fd;' : '';
+    const rowColor = expired && !zero ? 'color:#e65100;' : zero ? 'color:#c62828;' : '';
+    const expStyle = expired && !zero ? 'color:#e65100;font-weight:700'
+                   : soon ? 'color:#f57c00;font-weight:700' : '';
+    return `
+      <tr style="${rowBg}${rowColor}cursor:pointer" onclick="selectCouponMember(${m.id})" id="cmrow-${m.id}">
+        <td>${m.id}</td>
+        <td><strong>${m.name}</strong></td>
+        <td>${m.phone || '-'}</td>
+        <td>${m.gender || '-'}</td>
+        <td style="color:var(--text-sub)">${m.memo || '-'}</td>
+        <td><strong style="color:${zero ? '#c62828' : '#2e7d32'}">${m.remaining}회</strong></td>
+        <td>${m.last_purchase || '-'}</td>
+        <td style="${expStyle}">${m.expire_date || '-'}</td>
+      </tr>`;
+  }).join('');
+}
+
+function selectCouponMember(id) {
+  selectedCouponMemberId = id;
+  renderCouponMembers();
+}
+
+// ─── 회원 모달 ────────────────────────────────────
+function openCouponMemberModal(member = null) {
+  couponEditingId = member ? member.id : null;
+  document.getElementById('couponMemberModalTitle').textContent =
+    member ? '회원 수정' : '신규 회원 등록';
+  document.getElementById('cmName').value   = member?.name   || '';
+  document.getElementById('cmPhone').value  = member?.phone  || '';
+  document.getElementById('cmGender').value = member?.gender || '남';
+  document.getElementById('cmMemo').value   = member?.memo   || '';
+  document.getElementById('cmError').style.display = 'none';
+  document.getElementById('couponMemberModal').style.display = 'flex';
+}
+
+function closeCouponMemberModal() {
+  document.getElementById('couponMemberModal').style.display = 'none';
+}
+
+function closeCouponMemberModalOnBg(e) {
+  if (e.target === document.getElementById('couponMemberModal')) closeCouponMemberModal();
+}
+
+async function saveCouponMember() {
+  const name   = document.getElementById('cmName').value.trim();
+  const phone  = document.getElementById('cmPhone').value.trim();
+  const gender = document.getElementById('cmGender').value;
+  const memo   = document.getElementById('cmMemo').value.trim();
+  const errEl  = document.getElementById('cmError');
+  errEl.style.display = 'none';
+  if (!name) { errEl.textContent = '이름을 입력해주세요'; errEl.style.display = 'block'; return; }
+
+  const res = couponEditingId
+    ? await apiFetch(`/api/coupon/members/${couponEditingId}`,
+        { method: 'PUT',  body: JSON.stringify({ name, phone, gender, memo }) })
+    : await apiFetch('/api/coupon/members',
+        { method: 'POST', body: JSON.stringify({ name, phone, gender, memo }) });
+  if (!res) return;
+  const data = await res.json();
+  if (!res.ok) { errEl.textContent = data.error; errEl.style.display = 'block'; return; }
+  closeCouponMemberModal();
+  await loadCouponMembers();
+}
+
+function editCouponMember() {
+  if (!selectedCouponMemberId) return alert('수정할 회원을 선택해주세요');
+  const m = couponMembers.find(m => m.id === selectedCouponMemberId);
+  if (m) openCouponMemberModal(m);
+}
+
+async function deleteCouponMember() {
+  if (!selectedCouponMemberId) return alert('삭제할 회원을 선택해주세요');
+  const m = couponMembers.find(m => m.id === selectedCouponMemberId);
+  if (!m) return;
+  if (!confirm(`'${m.name}' 회원을 삭제하시겠습니까?\n이용권 및 이용 내역도 모두 삭제됩니다.`)) return;
+  const res = await apiFetch(`/api/coupon/members/${selectedCouponMemberId}`, { method: 'DELETE' });
+  if (res?.ok) { selectedCouponMemberId = null; await loadCouponMembers(); }
+  else alert('삭제 실패');
+}
+
+// ─── 이용권 구매 모달 ─────────────────────────────
+function calcCouponExpire(purchaseDate, type) {
+  const d = new Date(purchaseDate);
+  d.setMonth(d.getMonth() + (type === 10 ? 1 : 3));
+  return getLocalDate(d);
+}
+
+function openCouponTicketModal() {
+  if (!selectedCouponMemberId) return alert('이용권을 구매할 회원을 선택해주세요');
+  const m = couponMembers.find(m => m.id === selectedCouponMemberId);
+  if (!m) return;
+  couponTicketType = 10;
+  document.getElementById('ctMemberName').textContent = `회원: ${m.name}`;
+  document.getElementById('ctPurchaseDate').value = getLocalDate();
+  document.querySelectorAll('.ticket-type-btn').forEach(b =>
+    b.classList.toggle('selected', parseInt(b.dataset.type) === 10)
+  );
+  updateCouponExpireDisplay();
+  document.getElementById('ctError').style.display = 'none';
+  document.getElementById('couponTicketModal').style.display = 'flex';
+}
+
+function selectTicketType(type) {
+  couponTicketType = type;
+  document.querySelectorAll('.ticket-type-btn').forEach(b =>
+    b.classList.toggle('selected', parseInt(b.dataset.type) === type)
+  );
+  updateCouponExpireDisplay();
+}
+
+function updateCouponExpireDisplay() {
+  const pd = document.getElementById('ctPurchaseDate').value;
+  const el = document.getElementById('ctExpireDate');
+  el.textContent = pd ? calcCouponExpire(pd, couponTicketType) : '구매일을 선택하세요';
+}
+
+function closeCouponTicketModal() {
+  document.getElementById('couponTicketModal').style.display = 'none';
+}
+
+function closeCouponTicketModalOnBg(e) {
+  if (e.target === document.getElementById('couponTicketModal')) closeCouponTicketModal();
+}
+
+async function saveCouponTicket() {
+  const purchase_date = document.getElementById('ctPurchaseDate').value;
+  const errEl = document.getElementById('ctError');
+  errEl.style.display = 'none';
+  if (!purchase_date) {
+    errEl.textContent = '구매일을 선택해주세요'; errEl.style.display = 'block'; return;
+  }
+  const res = await apiFetch('/api/coupon/tickets', {
+    method: 'POST',
+    body: JSON.stringify({ member_id: selectedCouponMemberId, ticket_type: couponTicketType, purchase_date })
+  });
+  if (!res) return;
+  const data = await res.json();
+  if (!res.ok) { errEl.textContent = data.error; errEl.style.display = 'block'; return; }
+  const m = couponMembers.find(m => m.id === selectedCouponMemberId);
+  alert(`✅ ${m?.name} 회원\n${couponTicketType}회권 등록\n구매일: ${purchase_date}\n만료일: ${data.expire_date}`);
+  closeCouponTicketModal();
+  await loadCouponMembers();
+}
+
+// ─── 이용 처리 모달 ───────────────────────────────
+async function openCouponUseModal() {
+  if (!selectedCouponMemberId) return alert('이용 처리할 회원을 선택해주세요');
+  const m = couponMembers.find(m => m.id === selectedCouponMemberId);
+  if (!m) return;
+  const res = await apiFetch(`/api/coupon/tickets/${selectedCouponMemberId}`);
+  if (!res) return;
+  couponTickets = await res.json();
+  if (!couponTickets.length) {
+    alert(`'${m.name}' 회원의 잔여 이용권이 없습니다.`); return;
+  }
+  document.getElementById('cuMemberName').textContent = `회원: ${m.name}`;
+  document.getElementById('cuUsedDate').value = getLocalDate();
+  document.getElementById('cuTicketSelect').innerHTML = couponTickets.map(t =>
+    `<option value="${t.id}">${t.ticket_type}회권 | 잔여 ${t.remaining}회 | ${t.purchase_date} ~ ${t.expire_date}</option>`
+  ).join('');
+  document.getElementById('cuError').style.display = 'none';
+  document.getElementById('couponUseModal').style.display = 'flex';
+}
+
+function closeCouponUseModal() {
+  document.getElementById('couponUseModal').style.display = 'none';
+}
+
+function closeCouponUseModalOnBg(e) {
+  if (e.target === document.getElementById('couponUseModal')) closeCouponUseModal();
+}
+
+async function saveCouponUse() {
+  const ticket_id = parseInt(document.getElementById('cuTicketSelect').value);
+  const used_date = document.getElementById('cuUsedDate').value;
+  const errEl = document.getElementById('cuError');
+  errEl.style.display = 'none';
+  if (!used_date) { errEl.textContent = '이용일을 선택해주세요'; errEl.style.display = 'block'; return; }
+  const res = await apiFetch('/api/coupon/use', {
+    method: 'POST',
+    body: JSON.stringify({ ticket_id, member_id: selectedCouponMemberId, used_date })
+  });
+  if (!res) return;
+  const data = await res.json();
+  if (!res.ok) { errEl.textContent = data.error; errEl.style.display = 'block'; return; }
+  const m = couponMembers.find(m => m.id === selectedCouponMemberId);
+  alert(`✅ ${m?.name} 회원\n이용일: ${used_date}\n잔여: ${data.remaining}회`);
+  closeCouponUseModal();
+  await loadCouponMembers();
+}
+
+// ─── 이용 내역 ────────────────────────────────────
+async function loadCouponLogs() {
+  const search = document.getElementById('couponLogSearch').value.trim();
+  const url = search
+    ? `/api/coupon/logs?search=${encodeURIComponent(search)}`
+    : '/api/coupon/logs';
+  const res = await apiFetch(url);
+  if (!res) return;
+  couponLogs = await res.json();
+  const tbody = document.getElementById('couponLogBody');
+  const empty = document.getElementById('couponLogEmpty');
+  if (!couponLogs.length) { tbody.innerHTML = ''; empty.style.display = 'block'; return; }
+  empty.style.display = 'none';
+  tbody.innerHTML = couponLogs.map((l, i) => `
+    <tr style="cursor:pointer${i%2?' background:#f9f9f9':''}" onclick="selectCouponLog(this)" data-id="${l.id}">
+      <td>${l.id}</td>
+      <td>${l.used_date}</td>
+      <td><strong>${l.name}</strong></td>
+      <td>${l.phone || '-'}</td>
+      <td>${l.ticket_type}회권</td>
+      <td>${l.remaining}회</td>
+      <td style="color:var(--text-sub);font-size:12px">${new Date(l.created_at).toLocaleString('ko-KR')}</td>
+    </tr>`).join('');
+}
+
+function selectCouponLog(tr) {
+  document.querySelectorAll('#couponLogBody tr').forEach(r => r.style.background = '');
+  tr.style.background = '#e3f2fd';
+}
+
+async function cancelCouponUse() {
+  const sel = document.querySelector('#couponLogBody tr[style*="#e3f2fd"]');
+  if (!sel) return alert('취소할 내역을 선택해주세요');
+  const id  = sel.dataset.id;
+  const log = couponLogs.find(l => l.id == id);
+  if (!confirm(`'${log?.name}' 회원의 ${log?.used_date} 이용을 취소하시겠습니까?\n잔여 횟수가 1회 복구됩니다.`)) return;
+  const res = await apiFetch(`/api/coupon/logs/${id}`, { method: 'DELETE' });
+  if (res?.ok) { await loadCouponLogs(); await loadCouponMembers(); }
+  else alert('취소 실패');
+}
+
+// ─── 쿠폰 통계 ────────────────────────────────────
+async function loadCouponStats() {
+  const res = await apiFetch('/api/coupon/stats');
+  if (!res) return;
+  const data = await res.json();
+  const cards = [
+    { icon:'👥', title:'전체 회원',   value:`${data.total_members}명`,   color:'#1565c0' },
+    { icon:'✅', title:'활성 회원',   value:`${data.active_members}명`,  color:'#2e7d32' },
+    { icon:'⛳', title:'오늘 이용',   value:`${data.today_use}회`,       color:'#f9a825' },
+    { icon:'📅', title:'이번 달 이용', value:`${data.month_use}회`,      color:'#7b1fa2' },
+    { icon:'🎫', title:'전체 잔여',   value:`${data.total_remaining}회`, color:'#2e7d32' },
+    { icon:'⚠️', title:'만료 임박',   value:`${data.expire_soon.length}명`, color:'#e65100' },
+  ];
+  let html = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px">`;
+  cards.forEach(c => {
+    html += `<div class="card" style="text-align:center;border-top:3px solid ${c.color}">
+      <div style="font-size:28px;margin-bottom:6px">${c.icon}</div>
+      <div style="font-size:12px;color:var(--text-sub);font-weight:600">${c.title}</div>
+      <div style="font-size:24px;font-weight:800;color:${c.color};margin:4px 0">${c.value}</div>
+    </div>`;
+  });
+  html += `</div>`;
+
+  if (data.expire_soon.length) {
+    html += `<div class="card"><h3 class="card-title" style="color:#e65100">⚠️ 만료 임박 (7일 이내)</h3>`;
+    data.expire_soon.forEach(m => {
+      html += `<div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
+        <strong>${m.name}</strong>
+        <span style="color:#e65100;font-weight:700">만료일: ${m.expire_date} | 잔여 ${m.remaining}회 | D-${m.days_left}</span>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
+  if (data.expired.length) {
+    html += `<div class="card mt-16"><h3 class="card-title" style="color:#c62828">🚫 만료된 이용권 (잔여 있음)</h3>`;
+    data.expired.forEach(m => {
+      html += `<div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
+        <strong>${m.name}</strong>
+        <span style="color:#c62828;font-weight:700">만료일: ${m.expire_date} | 잔여 ${m.remaining}회 | 만료됨</span>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
+  document.getElementById('couponStatsBody').innerHTML = html;
+}

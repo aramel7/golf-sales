@@ -213,6 +213,179 @@ app.get('/api/stats', auth, async (req, res) => {
   }
 });
 
+// ─── 쿠폰 회원 조회 ──────────────────────────────────────────
+app.get('/api/coupon/members', auth, async (req, res) => {
+  try {
+    const { search } = req.query;
+    const where = search ? 'WHERE m.name ILIKE $1 OR m.phone ILIKE $1' : '';
+    const params = search ? [`%${search}%`] : [];
+    const { rows } = await pool.query(`
+      SELECT m.id, m.name, m.phone, m.gender, m.memo,
+             COALESCE(SUM(t.remaining),0)::int AS remaining,
+             MAX(t.purchase_date)::text AS last_purchase,
+             MAX(t.expire_date)::text   AS expire_date
+      FROM coupon_members m
+      LEFT JOIN coupon_tickets t ON t.member_id = m.id
+      ${where} GROUP BY m.id ORDER BY m.name
+    `, params);
+    res.json(rows);
+  } catch (err) { console.error(err); res.status(500).json({ error: '회원 조회 실패' }); }
+});
+
+// ─── 쿠폰 회원 등록 ──────────────────────────────────────────
+app.post('/api/coupon/members', auth, async (req, res) => {
+  try {
+    const { name, phone, gender, memo } = req.body;
+    if (!name) return res.status(400).json({ error: '이름을 입력하세요' });
+    const { rows } = await pool.query(
+      'INSERT INTO coupon_members(name,phone,gender,memo) VALUES($1,$2,$3,$4) RETURNING *',
+      [name, phone||'', gender||'남', memo||'']
+    );
+    res.json(rows[0]);
+  } catch (err) { console.error(err); res.status(500).json({ error: '회원 등록 실패' }); }
+});
+
+// ─── 쿠폰 회원 수정 ──────────────────────────────────────────
+app.put('/api/coupon/members/:id', auth, async (req, res) => {
+  try {
+    const { name, phone, gender, memo } = req.body;
+    if (!name) return res.status(400).json({ error: '이름을 입력하세요' });
+    const { rows } = await pool.query(
+      'UPDATE coupon_members SET name=$1,phone=$2,gender=$3,memo=$4 WHERE id=$5 RETURNING *',
+      [name, phone||'', gender||'남', memo||'', req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: '회원을 찾을 수 없습니다' });
+    res.json(rows[0]);
+  } catch (err) { console.error(err); res.status(500).json({ error: '회원 수정 실패' }); }
+});
+
+// ─── 쿠폰 회원 삭제 ──────────────────────────────────────────
+app.delete('/api/coupon/members/:id', auth, async (req, res) => {
+  try {
+    const { rowCount } = await pool.query('DELETE FROM coupon_members WHERE id=$1', [req.params.id]);
+    if (!rowCount) return res.status(404).json({ error: '회원을 찾을 수 없습니다' });
+    res.json({ success: true });
+  } catch (err) { console.error(err); res.status(500).json({ error: '회원 삭제 실패' }); }
+});
+
+// ─── 잔여 이용권 조회 (이용 처리 모달용) ─────────────────────
+app.get('/api/coupon/tickets/:memberId', auth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, ticket_type, remaining, purchase_date::text, expire_date::text
+       FROM coupon_tickets WHERE member_id=$1 AND remaining>0 ORDER BY expire_date`,
+      [req.params.memberId]
+    );
+    res.json(rows);
+  } catch (err) { console.error(err); res.status(500).json({ error: '이용권 조회 실패' }); }
+});
+
+// ─── 이용권 구매 ─────────────────────────────────────────────
+app.post('/api/coupon/tickets', auth, async (req, res) => {
+  try {
+    const { member_id, ticket_type, purchase_date } = req.body;
+    if (!member_id || !ticket_type || !purchase_date)
+      return res.status(400).json({ error: '필수 항목을 입력하세요' });
+    if (![10, 20, 30].includes(Number(ticket_type)))
+      return res.status(400).json({ error: '올바른 이용권 종류를 선택하세요' });
+    const months = Number(ticket_type) === 10 ? 1 : 3;
+    const ed = new Date(purchase_date);
+    ed.setMonth(ed.getMonth() + months);
+    const expireDate = ed.toISOString().split('T')[0];
+    const { rows } = await pool.query(
+      'INSERT INTO coupon_tickets(member_id,ticket_type,remaining,purchase_date,expire_date) VALUES($1,$2,$3,$4,$5) RETURNING *',
+      [member_id, ticket_type, ticket_type, purchase_date, expireDate]
+    );
+    res.json({ ...rows[0], expire_date: expireDate });
+  } catch (err) { console.error(err); res.status(500).json({ error: '이용권 등록 실패' }); }
+});
+
+// ─── 이용 처리 ───────────────────────────────────────────────
+app.post('/api/coupon/use', auth, async (req, res) => {
+  try {
+    const { ticket_id, member_id, used_date } = req.body;
+    if (!ticket_id || !member_id || !used_date)
+      return res.status(400).json({ error: '필수 항목을 입력하세요' });
+    const { rows } = await pool.query(
+      'SELECT remaining FROM coupon_tickets WHERE id=$1 AND member_id=$2', [ticket_id, member_id]
+    );
+    if (!rows.length) return res.status(404).json({ error: '이용권을 찾을 수 없습니다' });
+    if (rows[0].remaining <= 0) return res.status(400).json({ error: '잔여 횟수가 없습니다' });
+    await pool.query('UPDATE coupon_tickets SET remaining=remaining-1 WHERE id=$1', [ticket_id]);
+    await pool.query(
+      'INSERT INTO coupon_usage_log(ticket_id,member_id,used_date) VALUES($1,$2,$3)',
+      [ticket_id, member_id, used_date]
+    );
+    const { rows: updated } = await pool.query('SELECT remaining FROM coupon_tickets WHERE id=$1', [ticket_id]);
+    res.json({ remaining: updated[0].remaining });
+  } catch (err) { console.error(err); res.status(500).json({ error: '이용 처리 실패' }); }
+});
+
+// ─── 이용 내역 조회 ──────────────────────────────────────────
+app.get('/api/coupon/logs', auth, async (req, res) => {
+  try {
+    const { search } = req.query;
+    const where = search ? 'WHERE m.name ILIKE $1' : '';
+    const params = search ? [`%${search}%`] : [];
+    const { rows } = await pool.query(`
+      SELECT u.id, u.used_date::text, m.name, m.phone,
+             t.ticket_type, t.remaining, u.created_at
+      FROM coupon_usage_log u
+      JOIN coupon_members m ON m.id=u.member_id
+      JOIN coupon_tickets t ON t.id=u.ticket_id
+      ${where} ORDER BY u.used_date DESC, u.id DESC
+    `, params);
+    res.json(rows);
+  } catch (err) { console.error(err); res.status(500).json({ error: '이용 내역 조회 실패' }); }
+});
+
+// ─── 이용 취소 ───────────────────────────────────────────────
+app.delete('/api/coupon/logs/:id', auth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT ticket_id FROM coupon_usage_log WHERE id=$1', [req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: '내역을 찾을 수 없습니다' });
+    await pool.query('UPDATE coupon_tickets SET remaining=remaining+1 WHERE id=$1', [rows[0].ticket_id]);
+    await pool.query('DELETE FROM coupon_usage_log WHERE id=$1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) { console.error(err); res.status(500).json({ error: '이용 취소 실패' }); }
+});
+
+// ─── 쿠폰 통계 ───────────────────────────────────────────────
+app.get('/api/coupon/stats', auth, async (_req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const ym = today.slice(0, 7);
+    const [
+      { rows: [{ total_members }] },
+      { rows: [{ active_members }] },
+      { rows: [{ today_use }] },
+      { rows: [{ month_use }] },
+      { rows: [{ total_remaining }] },
+      { rows: expire_soon },
+      { rows: expired }
+    ] = await Promise.all([
+      pool.query('SELECT COUNT(*)::int AS total_members FROM coupon_members'),
+      pool.query(`SELECT COUNT(DISTINCT m.id)::int AS active_members FROM coupon_members m
+                  WHERE EXISTS(SELECT 1 FROM coupon_tickets t WHERE t.member_id=m.id AND t.remaining>0)`),
+      pool.query('SELECT COUNT(*)::int AS today_use FROM coupon_usage_log WHERE used_date=$1', [today]),
+      pool.query('SELECT COUNT(*)::int AS month_use FROM coupon_usage_log WHERE used_date::text LIKE $1', [`${ym}%`]),
+      pool.query('SELECT COALESCE(SUM(remaining),0)::int AS total_remaining FROM coupon_tickets'),
+      pool.query(`SELECT m.name, t.expire_date::text, t.remaining,
+                         (t.expire_date - CURRENT_DATE)::int AS days_left
+                  FROM coupon_tickets t JOIN coupon_members m ON m.id=t.member_id
+                  WHERE t.remaining>0 AND t.expire_date>=CURRENT_DATE AND t.expire_date<=CURRENT_DATE+7
+                  ORDER BY t.expire_date`),
+      pool.query(`SELECT m.name, t.expire_date::text, t.remaining
+                  FROM coupon_tickets t JOIN coupon_members m ON m.id=t.member_id
+                  WHERE t.remaining>0 AND t.expire_date<CURRENT_DATE
+                  ORDER BY t.expire_date`)
+    ]);
+    res.json({ total_members, active_members, today_use, month_use, total_remaining, expire_soon, expired });
+  } catch (err) { console.error(err); res.status(500).json({ error: '통계 조회 실패' }); }
+});
+
 // ─── 서버 시작 ────────────────────────────────────────────────
 initDB().then(() => {
   const PORT = process.env.PORT || 3000;
