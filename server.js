@@ -386,6 +386,141 @@ app.get('/api/coupon/stats', auth, async (_req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: '통계 조회 실패' }); }
 });
 
+// ─── 비품 카테고리 ───────────────────────────────────────────
+app.get('/api/supply/categories', auth, async (_req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM supply_categories ORDER BY sort_order, id');
+    res.json(rows);
+  } catch (err) { console.error(err); res.status(500).json({ error: '카테고리 조회 실패' }); }
+});
+app.post('/api/supply/categories', auth, async (req, res) => {
+  try {
+    const { name, color } = req.body;
+    if (!name) return res.status(400).json({ error: '카테고리명을 입력하세요' });
+    const { rows } = await pool.query(
+      'INSERT INTO supply_categories(name,color) VALUES($1,$2) RETURNING *',
+      [name, color || '#2e7d32']
+    );
+    res.json(rows[0]);
+  } catch (err) { console.error(err); res.status(500).json({ error: '카테고리 추가 실패' }); }
+});
+app.delete('/api/supply/categories/:id', auth, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM supply_categories WHERE id=$1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) { console.error(err); res.status(500).json({ error: '카테고리 삭제 실패' }); }
+});
+
+// ─── 비품 품목 자동완성 ──────────────────────────────────────
+app.get('/api/supply/items', auth, async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT item_name, COUNT(*) cnt FROM supply_purchases GROUP BY item_name ORDER BY cnt DESC LIMIT 50'
+    );
+    res.json(rows.map(r => r.item_name));
+  } catch (err) { console.error(err); res.status(500).json({ error: '품목 조회 실패' }); }
+});
+
+// ─── 비품 구매 CRUD ──────────────────────────────────────────
+app.get('/api/supply/purchases', auth, async (req, res) => {
+  try {
+    const { year_month, start, end, category_id } = req.query;
+    const conds = []; const params = []; let pi = 1;
+    if (year_month)  { conds.push(`TO_CHAR(sp.date,'YYYY-MM')=$${pi++}`); params.push(year_month); }
+    if (start)       { conds.push(`sp.date>=$${pi++}`); params.push(start); }
+    if (end)         { conds.push(`sp.date<=$${pi++}`); params.push(end); }
+    if (category_id) { conds.push(`sp.category_id=$${pi++}`); params.push(category_id); }
+    const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
+    const { rows } = await pool.query(`
+      SELECT sp.id, sp.date::text, sc.name AS category_name, sc.color,
+             sp.category_id, sp.item_name, sp.quantity, sp.unit_price, sp.amount, sp.notes, sp.created_at
+      FROM supply_purchases sp
+      LEFT JOIN supply_categories sc ON sc.id=sp.category_id
+      ${where} ORDER BY sp.date DESC, sp.created_at DESC
+    `, params);
+    res.json(rows);
+  } catch (err) { console.error(err); res.status(500).json({ error: '구매 조회 실패' }); }
+});
+app.post('/api/supply/purchases', auth, async (req, res) => {
+  try {
+    const { date, category_id, item_name, quantity, unit_price, amount, notes } = req.body;
+    if (!date || !item_name || !amount) return res.status(400).json({ error: '필수 항목을 입력하세요' });
+    const { rows } = await pool.query(
+      'INSERT INTO supply_purchases(date,category_id,item_name,quantity,unit_price,amount,notes) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+      [date, category_id || null, item_name, quantity || 1, unit_price || 0, amount, notes || '']
+    );
+    res.json(rows[0]);
+  } catch (err) { console.error(err); res.status(500).json({ error: '구매 등록 실패' }); }
+});
+app.put('/api/supply/purchases/:id', auth, async (req, res) => {
+  try {
+    const { date, category_id, item_name, quantity, unit_price, amount, notes } = req.body;
+    if (!date || !item_name || !amount) return res.status(400).json({ error: '필수 항목을 입력하세요' });
+    const { rows } = await pool.query(
+      'UPDATE supply_purchases SET date=$1,category_id=$2,item_name=$3,quantity=$4,unit_price=$5,amount=$6,notes=$7 WHERE id=$8 RETURNING *',
+      [date, category_id || null, item_name, quantity || 1, unit_price || 0, amount, notes || '', req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: '구매 내역을 찾을 수 없습니다' });
+    res.json(rows[0]);
+  } catch (err) { console.error(err); res.status(500).json({ error: '구매 수정 실패' }); }
+});
+app.delete('/api/supply/purchases/:id', auth, async (req, res) => {
+  try {
+    const { rowCount } = await pool.query('DELETE FROM supply_purchases WHERE id=$1', [req.params.id]);
+    if (!rowCount) return res.status(404).json({ error: '내역을 찾을 수 없습니다' });
+    res.json({ success: true });
+  } catch (err) { console.error(err); res.status(500).json({ error: '삭제 실패' }); }
+});
+
+// ─── 비품 통계 ───────────────────────────────────────────────
+app.get('/api/supply/stats', auth, async (_req, res) => {
+  try {
+    const [{ rows: monthly }, { rows: byCat }, { rows: topItems }] = await Promise.all([
+      pool.query(`
+        SELECT TO_CHAR(date,'YYYY-MM') AS month,
+               COALESCE(SUM(amount),0)::int AS total, COUNT(*)::int AS count
+        FROM supply_purchases
+        WHERE date >= CURRENT_DATE - INTERVAL '12 months'
+        GROUP BY month ORDER BY month
+      `),
+      pool.query(`
+        SELECT sc.name, sc.color,
+               COALESCE(SUM(sp.amount),0)::int AS total, COUNT(sp.id)::int AS count
+        FROM supply_categories sc
+        LEFT JOIN supply_purchases sp ON sp.category_id=sc.id
+        GROUP BY sc.id, sc.name, sc.color ORDER BY total DESC
+      `),
+      pool.query(`
+        SELECT item_name, COUNT(*)::int AS purchase_count,
+               COALESCE(SUM(amount),0)::int AS total_amount
+        FROM supply_purchases
+        GROUP BY item_name ORDER BY total_amount DESC LIMIT 10
+      `)
+    ]);
+    res.json({ monthly, byCat, topItems });
+  } catch (err) { console.error(err); res.status(500).json({ error: '통계 조회 실패' }); }
+});
+
+// ─── 비품 예산 ───────────────────────────────────────────────
+app.get('/api/supply/budget/:year_month', auth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT budget FROM supply_budget WHERE year_month=$1', [req.params.year_month]
+    );
+    res.json({ budget: rows[0]?.budget || 0 });
+  } catch (err) { console.error(err); res.status(500).json({ error: '예산 조회 실패' }); }
+});
+app.put('/api/supply/budget/:year_month', auth, async (req, res) => {
+  try {
+    const { budget } = req.body;
+    await pool.query(`
+      INSERT INTO supply_budget(year_month,budget) VALUES($1,$2)
+      ON CONFLICT(year_month) DO UPDATE SET budget=$2
+    `, [req.params.year_month, budget || 0]);
+    res.json({ success: true });
+  } catch (err) { console.error(err); res.status(500).json({ error: '예산 저장 실패' }); }
+});
+
 // ─── 서버 시작 ────────────────────────────────────────────────
 initDB().then(() => {
   const PORT = process.env.PORT || 3000;

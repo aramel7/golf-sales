@@ -96,6 +96,7 @@ function switchTab(tab) {
   if (tab === 'history') loadHistory();
   if (tab === 'stats') loadStats();
   if (tab === 'coupon') loadCouponMembers();
+  if (tab === 'supply') loadSupplyTab();
 }
 
 // ─── 방 / 결제수단 선택 ───────────────────────────
@@ -588,10 +589,10 @@ let couponTickets = [];
 
 // ─── 서브탭 전환 ──────────────────────────────────
 function switchCouponSub(sub) {
-  document.querySelectorAll('.coupon-sub-tab').forEach(t =>
+  document.querySelectorAll('#tab-coupon .coupon-sub-tab').forEach(t =>
     t.classList.toggle('active', t.dataset.sub === sub)
   );
-  document.querySelectorAll('.coupon-sub-content').forEach(c =>
+  document.querySelectorAll('#tab-coupon .coupon-sub-content').forEach(c =>
     c.classList.toggle('active', c.id === `coupon-sub-${sub}`)
   );
   if (sub === 'logs') loadCouponLogs();
@@ -860,6 +861,441 @@ async function cancelCouponUse() {
 }
 
 // ─── 쿠폰 통계 ────────────────────────────────────
+// ═══════════════════════════════════════════════════
+// 비품구매 관리
+// ═══════════════════════════════════════════════════
+
+// ─── 상태 ─────────────────────────────────────────
+let supplyCategories = [];
+let selectedSupplyCatId = null;
+let supplyEditingId = null;
+let supplyData = [];
+let supplyHistData = [];
+let supplyMonthChartInst = null;
+let supplyCatChartInst = null;
+let supplyTabLoaded = false;
+
+// ─── 탭 초기화 ────────────────────────────────────
+async function loadSupplyTab() {
+  if (!supplyTabLoaded) {
+    supplyTabLoaded = true;
+    const today = getLocalDate();
+    const ym    = today.slice(0, 7);
+    document.getElementById('supplyDate').value   = today;
+    document.getElementById('supplyMonth').value  = ym;
+    document.getElementById('budgetMonth').value  = ym;
+    document.getElementById('supHistStart').value = ym + '-01';
+    document.getElementById('supHistEnd').value   = today;
+  }
+  await loadSupplyCategories();
+}
+
+// ─── 서브탭 전환 ──────────────────────────────────
+function switchSupplySub(sub) {
+  document.querySelectorAll('#tab-supply .coupon-sub-tab').forEach(t =>
+    t.classList.toggle('active', t.dataset.sub === sub)
+  );
+  document.querySelectorAll('#tab-supply .coupon-sub-content').forEach(c =>
+    c.classList.toggle('active', c.id === `supply-sub-${sub}`)
+  );
+  if (sub === 'sstats')  loadSupplyStats();
+  if (sub === 'sconfig') loadSupplyCatList();
+}
+
+// ─── 카테고리 ─────────────────────────────────────
+async function loadSupplyCategories() {
+  const res = await apiFetch('/api/supply/categories');
+  if (!res) return;
+  supplyCategories = await res.json();
+  renderSupplyCatButtons();
+  // 이력 필터 드롭다운 갱신
+  const sel = document.getElementById('supHistCat');
+  sel.innerHTML = '<option value="">전체</option>' +
+    supplyCategories.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+  loadSupplyDashboard();
+  loadSupplyItemSuggestions();
+}
+
+function renderSupplyCatButtons() {
+  document.getElementById('supplyCatButtons').innerHTML = supplyCategories.map(c => {
+    const sel = selectedSupplyCatId === c.id;
+    return `<button class="supply-cat-btn${sel ? ' selected' : ''}"
+              data-id="${c.id}"
+              style="${sel ? `background:${c.color};border-color:${c.color}` : ''}"
+              onclick="selectSupplyCat(${c.id})">${c.name}</button>`;
+  }).join('');
+}
+
+function selectSupplyCat(id) {
+  selectedSupplyCatId = selectedSupplyCatId === id ? null : id;
+  document.querySelectorAll('.supply-cat-btn').forEach(b => {
+    const cid = parseInt(b.dataset.id);
+    const cat = supplyCategories.find(c => c.id === cid);
+    const sel = cid === selectedSupplyCatId;
+    b.classList.toggle('selected', sel);
+    b.style.background  = sel ? cat.color : '';
+    b.style.borderColor = sel ? cat.color : '';
+  });
+}
+
+async function loadSupplyItemSuggestions() {
+  const res = await apiFetch('/api/supply/items');
+  if (!res) return;
+  const items = await res.json();
+  document.getElementById('supplyItemSuggest').innerHTML =
+    items.map(n => `<option value="${n.replace(/"/g, '&quot;')}">`).join('');
+}
+
+// ─── 금액 자동 계산 ───────────────────────────────
+function formatSupplyUnitPrice(el) {
+  const raw = el.value.replace(/[^0-9]/g, '');
+  el.value = raw ? parseInt(raw).toLocaleString('ko-KR') : '';
+  calcSupplyAmount();
+}
+
+function calcSupplyAmount() {
+  const qty = parseInt(document.getElementById('supplyQty').value) || 0;
+  const up  = parseInt(document.getElementById('supplyUnitPrice').value.replace(/,/g, '')) || 0;
+  document.getElementById('supplyAmountDisplay').textContent = fmtWon(qty * up);
+}
+
+// ─── 구매 등록 / 수정 ─────────────────────────────
+async function submitSupplyPurchase() {
+  const errEl     = document.getElementById('supplyFormError');
+  errEl.style.display = 'none';
+  const date      = document.getElementById('supplyDate').value;
+  const item_name = document.getElementById('supplyItemName').value.trim();
+  const quantity  = parseInt(document.getElementById('supplyQty').value) || 1;
+  const unit_price = parseInt(document.getElementById('supplyUnitPrice').value.replace(/,/g, '')) || 0;
+  const amount    = quantity * unit_price;
+  const notes     = document.getElementById('supplyNotes').value.trim();
+
+  if (!date)       { errEl.textContent = '날짜를 선택해주세요';           errEl.style.display='block'; return; }
+  if (!item_name)  { errEl.textContent = '품목명을 입력해주세요';         errEl.style.display='block'; return; }
+  if (amount <= 0) { errEl.textContent = '수량과 단가를 입력해주세요';    errEl.style.display='block'; return; }
+
+  const btn = document.getElementById('supplySubmitBtn');
+  btn.disabled = true;
+  try {
+    const body = { date, category_id: selectedSupplyCatId, item_name, quantity, unit_price, amount, notes };
+    const res  = supplyEditingId
+      ? await apiFetch(`/api/supply/purchases/${supplyEditingId}`, { method:'PUT',  body:JSON.stringify(body) })
+      : await apiFetch('/api/supply/purchases',                    { method:'POST', body:JSON.stringify(body) });
+    if (!res) return;
+    const data = await res.json();
+    if (!res.ok) { errEl.textContent = data.error; errEl.style.display='block'; return; }
+    cancelSupplyEdit();
+    await loadSupplyDashboard();
+    loadSupplyItemSuggestions();
+  } catch { errEl.textContent = '등록 실패: 서버 오류'; errEl.style.display='block'; }
+  finally { btn.disabled = false; }
+}
+
+function startSupplyEdit(id) {
+  const row = supplyData.find(r => r.id === id);
+  if (!row) return;
+  supplyEditingId = id;
+  document.getElementById('supplyDate').value      = row.date;
+  document.getElementById('supplyItemName').value  = row.item_name;
+  document.getElementById('supplyQty').value       = row.quantity;
+  document.getElementById('supplyUnitPrice').value = row.unit_price.toLocaleString('ko-KR');
+  document.getElementById('supplyAmountDisplay').textContent = fmtWon(row.amount);
+  document.getElementById('supplyNotes').value     = row.notes || '';
+  selectedSupplyCatId = row.category_id;
+  renderSupplyCatButtons();
+  document.getElementById('supplySubmitBtn').textContent         = '수정하기';
+  document.getElementById('supplyCancelEditBtn').style.display   = 'block';
+  document.getElementById('supplyFormError').style.display       = 'none';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function cancelSupplyEdit() {
+  supplyEditingId    = null;
+  selectedSupplyCatId = null;
+  renderSupplyCatButtons();
+  document.getElementById('supplyDate').value      = getLocalDate();
+  document.getElementById('supplyItemName').value  = '';
+  document.getElementById('supplyQty').value       = '1';
+  document.getElementById('supplyUnitPrice').value = '';
+  document.getElementById('supplyAmountDisplay').textContent     = '₩0';
+  document.getElementById('supplyNotes').value     = '';
+  document.getElementById('supplySubmitBtn').textContent         = '등록하기';
+  document.getElementById('supplyCancelEditBtn').style.display   = 'none';
+  document.getElementById('supplyFormError').style.display       = 'none';
+}
+
+async function deleteSupplyPurchase(id) {
+  if (!confirm('이 구매 내역을 삭제하시겠습니까?')) return;
+  const res = await apiFetch(`/api/supply/purchases/${id}`, { method: 'DELETE' });
+  if (res?.ok) await loadSupplyDashboard();
+  else alert('삭제 실패');
+}
+
+// ─── 이번달 현황 ──────────────────────────────────
+async function loadSupplyDashboard() {
+  const ym = document.getElementById('supplyMonth').value;
+  if (!ym) return;
+  const res = await apiFetch(`/api/supply/purchases?year_month=${ym}`);
+  if (!res) return;
+  supplyData = await res.json();
+
+  const total = supplyData.reduce((s, r) => s + r.amount, 0);
+  document.getElementById('supplyTotal').textContent = fmtWon(total);
+  document.getElementById('supplyCount').textContent = `${supplyData.length}건`;
+
+  // 카테고리별 합계
+  const catMap = {};
+  supplyData.forEach(r => {
+    const key = r.category_id || 0;
+    if (!catMap[key]) catMap[key] = { name: r.category_name||'미분류', color: r.color||'#9e9e9e', total:0, count:0 };
+    catMap[key].total += r.amount;
+    catMap[key].count += 1;
+  });
+  const catBox = document.getElementById('supplyCatSummary');
+  catBox.innerHTML = Object.values(catMap).length === 0
+    ? '<div style="color:var(--text-sub);font-size:13px;padding:8px 0">구매 내역 없음</div>'
+    : Object.values(catMap).sort((a,b) => b.total - a.total).map(c => `
+        <div class="pay-row">
+          <span class="pay-label" style="color:${c.color}">● ${c.name}</span>
+          <span class="pay-amount">${fmtWon(c.total)}
+            <span style="color:var(--text-sub);font-size:12px;font-weight:400"> ${c.count}건</span>
+          </span>
+        </div>`).join('');
+
+  // 예산 바
+  const bRes = await apiFetch(`/api/supply/budget/${ym}`);
+  if (bRes) {
+    const { budget } = await bRes.json();
+    renderBudgetBar(budget, total, ym);
+  }
+
+  renderSupplyTable(supplyData);
+}
+
+function renderBudgetBar(budget, spent, ym) {
+  const box = document.getElementById('supplyBudgetBox');
+  if (!budget) {
+    box.innerHTML = `<div style="text-align:right;font-size:12px;color:var(--text-sub);margin-bottom:10px">
+      <a href="#" onclick="switchSupplySub('sconfig');document.getElementById('budgetMonth').value='${ym}';return false"
+         style="color:var(--primary-mid)">월 예산 설정하기 →</a></div>`;
+    return;
+  }
+  const pct   = Math.min(Math.round(spent / budget * 100), 100);
+  const color = pct < 70 ? '#2e7d32' : pct < 90 ? '#ff9800' : '#c62828';
+  box.innerHTML = `
+    <div style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-sub);margin-bottom:6px">
+        <span>월 예산: <strong>${fmtWon(budget)}</strong></span>
+        <span style="color:${color};font-weight:700">${fmtWon(spent)} (${pct}%)</span>
+      </div>
+      <div class="budget-bar">
+        <div class="budget-bar-fill" style="width:${pct}%;background:${color}"></div>
+      </div>
+      ${pct >= 90 ? `<div style="color:${color};font-size:11px;font-weight:700;margin-top:4px">⚠️ 예산 ${pct >= 100 ? '초과' : '90% 도달'}</div>` : ''}
+    </div>`;
+}
+
+function renderSupplyTable(rows) {
+  const tbody = document.getElementById('supplyBody');
+  const empty = document.getElementById('supplyEmpty');
+  if (!rows.length) { tbody.innerHTML = ''; empty.style.display = 'block'; return; }
+  empty.style.display = 'none';
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td>${r.date}</td>
+      <td>${r.category_name
+        ? `<span class="badge" style="background:${r.color}22;color:${r.color}">${r.category_name}</span>`
+        : '<span style="color:var(--text-sub)">-</span>'}</td>
+      <td><strong>${r.item_name}</strong></td>
+      <td style="text-align:center">${r.quantity}</td>
+      <td class="amount-cell">${fmtWon(r.unit_price)}</td>
+      <td class="amount-cell"><strong>${fmtWon(r.amount)}</strong></td>
+      <td style="color:var(--text-sub)">${r.notes || '-'}</td>
+      <td><div class="action-btns">
+        <button class="btn-edit" onclick="startSupplyEdit(${r.id})">수정</button>
+        <button class="btn-del"  onclick="deleteSupplyPurchase(${r.id})">삭제</button>
+      </div></td>
+    </tr>`).join('');
+}
+
+// ─── 구매 이력 ────────────────────────────────────
+async function loadSupplyHistory() {
+  const start = document.getElementById('supHistStart').value;
+  const end   = document.getElementById('supHistEnd').value;
+  const cat   = document.getElementById('supHistCat').value;
+  if (!start || !end) return alert('날짜 범위를 선택해주세요');
+  let url = `/api/supply/purchases?start=${start}&end=${end}`;
+  if (cat) url += `&category_id=${cat}`;
+  const res = await apiFetch(url);
+  if (!res) return;
+  supplyHistData = await res.json();
+
+  const total = supplyHistData.reduce((s, r) => s + r.amount, 0);
+  const box   = document.getElementById('supHistSummary');
+  box.style.display = supplyHistData.length ? 'flex' : 'none';
+  document.getElementById('supHistTotal').textContent = fmtWon(total);
+  document.getElementById('supHistCount').textContent = `${supplyHistData.length}건`;
+
+  const tbody = document.getElementById('supHistBody');
+  const empty = document.getElementById('supHistEmpty');
+  if (!supplyHistData.length) { tbody.innerHTML = ''; empty.style.display = 'block'; return; }
+  empty.style.display = 'none';
+  tbody.innerHTML = supplyHistData.map(r => `
+    <tr>
+      <td>${r.date}</td>
+      <td>${r.category_name
+        ? `<span class="badge" style="background:${r.color}22;color:${r.color}">${r.category_name}</span>`
+        : '<span style="color:var(--text-sub)">-</span>'}</td>
+      <td><strong>${r.item_name}</strong></td>
+      <td style="text-align:center">${r.quantity}</td>
+      <td class="amount-cell">${fmtWon(r.unit_price)}</td>
+      <td class="amount-cell"><strong>${fmtWon(r.amount)}</strong></td>
+      <td style="color:var(--text-sub)">${r.notes || '-'}</td>
+    </tr>`).join('');
+}
+
+// ─── 통계 ─────────────────────────────────────────
+async function loadSupplyStats() {
+  const res = await apiFetch('/api/supply/stats');
+  if (!res) return;
+  const data = await res.json();
+
+  // 월별 막대 차트
+  const mCtx = document.getElementById('supplyMonthChart').getContext('2d');
+  if (supplyMonthChartInst) supplyMonthChartInst.destroy();
+  supplyMonthChartInst = new Chart(mCtx, {
+    type: 'bar',
+    data: {
+      labels: data.monthly.map(d => d.month),
+      datasets: [{ label:'구매금액', data: data.monthly.map(d => d.total),
+                   backgroundColor:'#43a047', borderRadius:6 }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend:{display:false}, tooltip:{callbacks:{label: ctx => ` ${fmtWon(ctx.raw)}`}} },
+      scales:  { y: { ticks:{callback: v => fmtWon(v)} } }
+    }
+  });
+
+  // 카테고리 도넛 차트
+  const cCtx = document.getElementById('supplyCatChart').getContext('2d');
+  if (supplyCatChartInst) supplyCatChartInst.destroy();
+  const catData = data.byCat.filter(c => c.total > 0);
+  supplyCatChartInst = new Chart(cCtx, {
+    type: 'doughnut',
+    data: {
+      labels: catData.map(c => c.name),
+      datasets:[{ data: catData.map(c => c.total),
+                  backgroundColor: catData.map(c => c.color), borderWidth:2 }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position:'bottom' },
+        tooltip: { callbacks:{label: ctx => ` ${ctx.label}: ${fmtWon(ctx.raw)}`} }
+      }
+    }
+  });
+
+  // TOP 10 품목
+  const topEl = document.getElementById('supplyTopItems');
+  if (!data.topItems.length) {
+    topEl.innerHTML = '<div class="empty-msg">데이터가 없습니다.</div>'; return;
+  }
+  const maxAmt = data.topItems[0].total_amount;
+  topEl.innerHTML = data.topItems.map((item, i) => `
+    <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
+      <span style="font-weight:700;color:var(--text-sub);width:22px;text-align:right">${i+1}</span>
+      <span style="flex:1;font-weight:600">${item.item_name}</span>
+      <div style="flex:2;background:var(--border);border-radius:999px;height:8px">
+        <div style="width:${Math.round(item.total_amount/maxAmt*100)}%;height:100%;
+             background:var(--primary-light);border-radius:999px"></div>
+      </div>
+      <span style="font-weight:700;min-width:80px;text-align:right">${fmtWon(item.total_amount)}</span>
+      <span style="color:var(--text-sub);font-size:12px;min-width:36px;text-align:right">${item.purchase_count}회</span>
+    </div>`).join('');
+}
+
+// ─── 카테고리 관리 ────────────────────────────────
+function loadSupplyCatList() {
+  const list = document.getElementById('supplyCatList');
+  list.innerHTML = supplyCategories.length === 0
+    ? '<div style="color:var(--text-sub);padding:8px 0">카테고리가 없습니다.</div>'
+    : supplyCategories.map(c => `
+        <div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)">
+          <span style="width:14px;height:14px;border-radius:50%;background:${c.color};flex-shrink:0"></span>
+          <span style="flex:1;font-weight:600">${c.name}</span>
+          <button class="btn-del" onclick="deleteSupplyCategory(${c.id})">삭제</button>
+        </div>`).join('');
+}
+
+async function addSupplyCategory() {
+  const name  = document.getElementById('newCatName').value.trim();
+  const color = document.getElementById('newCatColor').value;
+  if (!name) return alert('카테고리명을 입력해주세요');
+  const res = await apiFetch('/api/supply/categories', {
+    method: 'POST', body: JSON.stringify({ name, color })
+  });
+  if (!res?.ok) return alert('추가 실패');
+  document.getElementById('newCatName').value = '';
+  await loadSupplyCategories();
+  loadSupplyCatList();
+}
+
+async function deleteSupplyCategory(id) {
+  const cat = supplyCategories.find(c => c.id === id);
+  if (!confirm(`'${cat?.name}' 카테고리를 삭제하시겠습니까?\n해당 카테고리의 구매 내역은 '미분류'로 변경됩니다.`)) return;
+  const res = await apiFetch(`/api/supply/categories/${id}`, { method: 'DELETE' });
+  if (!res?.ok) return alert('삭제 실패');
+  await loadSupplyCategories();
+  loadSupplyCatList();
+}
+
+// ─── 예산 설정 ────────────────────────────────────
+function formatBudgetInput() {
+  const el  = document.getElementById('budgetAmount');
+  const raw = el.value.replace(/[^0-9]/g, '');
+  el.value  = raw ? parseInt(raw).toLocaleString('ko-KR') : '';
+}
+
+async function saveBudget() {
+  const ym     = document.getElementById('budgetMonth').value;
+  const budget = parseInt(document.getElementById('budgetAmount').value.replace(/,/g, '')) || 0;
+  if (!ym)       return alert('월을 선택해주세요');
+  if (budget <= 0) return alert('예산 금액을 입력해주세요');
+  const res = await apiFetch(`/api/supply/budget/${ym}`, {
+    method: 'PUT', body: JSON.stringify({ budget })
+  });
+  if (res?.ok) alert(`✅ ${ym} 예산이 ${fmtWon(budget)}으로 저장되었습니다.`);
+  else alert('예산 저장 실패');
+}
+
+// ─── 엑셀 내보내기 ────────────────────────────────
+function exportSupply(type) {
+  const rows = type === 'month' ? supplyData : supplyHistData;
+  if (!rows?.length) return alert('내보낼 데이터가 없습니다');
+  const headers = ['날짜','카테고리','품목명','수량','단가(원)','금액(원)','비고'];
+  const body    = rows.map(r => [
+    r.date, r.category_name||'미분류', r.item_name,
+    r.quantity, r.unit_price, r.amount, r.notes||''
+  ]);
+  const total = rows.reduce((s, r) => s + r.amount, 0);
+  body.push(['합계','','','','',total,'']);
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...body]);
+  ws['!cols'] = [{wch:12},{wch:12},{wch:20},{wch:6},{wch:12},{wch:12},{wch:24}];
+  const wb = XLSX.utils.book_new();
+  if (type === 'month') {
+    const ym = document.getElementById('supplyMonth').value;
+    XLSX.utils.book_append_sheet(wb, ws, `비품구매_${ym}`);
+    XLSX.writeFile(wb, `비품구매_${ym}.xlsx`);
+  } else {
+    const s = document.getElementById('supHistStart').value;
+    const e = document.getElementById('supHistEnd').value;
+    XLSX.utils.book_append_sheet(wb, ws, '비품구매이력');
+    XLSX.writeFile(wb, `비품구매_${s}_${e}.xlsx`);
+  }
+}
+
 async function loadCouponStats() {
   const res = await apiFetch('/api/coupon/stats');
   if (!res) return;

@@ -230,3 +230,13 @@ input, select { font-family: inherit; font-size: 14px; }
                    transition: all .15s; }
 .ticket-type-btn.selected { background: var(--primary-mid); color: #fff; border-color: var(--primary-mid); }
 .ticket-type-btn:hover:not(.selected) { border-color: var(--accent); background: var(--primary-pale); }
+
+/* ─── 비품구매 ────────────────────────────────── */
+.supply-cat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.supply-cat-btn  { padding: 8px 6px; background: #f5f5f5; border: 2px solid var(--border);
+                   border-radius: 8px; font-weight: 700; font-size: 12px; color: var(--text);
+                   transition: all .15s; cursor: pointer; }
+.supply-cat-btn.selected { color: #fff; border-color: transparent; }
+.supply-cat-btn:hover:not(.selected) { background: var(--primary-pale); border-color: var(--accent); }
+.budget-bar      { background: var(--border); border-radius: 999px; height: 12px; overflow: hidden; }
+.budget-bar-fill { height: 100%; border-radius: 999px; transition: width .5s ease; }

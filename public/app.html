@@ -30,6 +30,7 @@
   <button class="nav-tab" data-tab="history">📅 매출내역</button>
   <button class="nav-tab" data-tab="stats">📊 통계</button>
   <button class="nav-tab" data-tab="coupon">🎫 쿠폰관리</button>
+  <button class="nav-tab" data-tab="supply">🛒 비품구매</button>
 </nav>
 
 <!-- ═══════════════════════════════════════════ -->
@@ -310,6 +311,200 @@
   <!-- 통계 -->
   <div class="coupon-sub-content" id="coupon-sub-cstats">
     <div id="couponStatsBody"></div>
+  </div>
+
+</section>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- 비품구매 탭                                  -->
+<!-- ═══════════════════════════════════════════ -->
+<section id="tab-supply" class="tab-content">
+
+  <div class="coupon-sub-nav">
+    <button class="coupon-sub-tab active" data-sub="sdash"   onclick="switchSupplySub('sdash')">📊 이번달 현황</button>
+    <button class="coupon-sub-tab"        data-sub="shist"   onclick="switchSupplySub('shist')">📋 구매 이력</button>
+    <button class="coupon-sub-tab"        data-sub="sstats"  onclick="switchSupplySub('sstats')">📈 통계</button>
+    <button class="coupon-sub-tab"        data-sub="sconfig" onclick="switchSupplySub('sconfig')">⚙️ 설정</button>
+  </div>
+
+  <!-- ── 이번달 현황 ── -->
+  <div class="coupon-sub-content active" id="supply-sub-sdash">
+    <div class="dashboard-grid">
+
+      <!-- 구매 입력 폼 -->
+      <div class="card">
+        <h2 class="card-title">비품 구매 입력</h2>
+        <div class="form-group">
+          <label>날짜</label>
+          <input type="date" id="supplyDate">
+        </div>
+        <div class="form-group">
+          <label>카테고리</label>
+          <div id="supplyCatButtons" class="supply-cat-grid"></div>
+        </div>
+        <div class="form-group">
+          <label>품목명</label>
+          <input type="text" id="supplyItemName" placeholder="예: 걸레, A4용지" list="supplyItemSuggest">
+          <datalist id="supplyItemSuggest"></datalist>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="form-group">
+            <label>수량</label>
+            <input type="number" id="supplyQty" value="1" min="1" oninput="calcSupplyAmount()">
+          </div>
+          <div class="form-group">
+            <label>단가 (원)</label>
+            <input type="text" id="supplyUnitPrice" placeholder="0" inputmode="numeric"
+                   oninput="formatSupplyUnitPrice(this)">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>금액 (원)</label>
+          <div id="supplyAmountDisplay" style="font-size:20px;font-weight:800;color:var(--primary);
+               padding:9px 12px;background:var(--primary-pale);border-radius:var(--radius);text-align:right">₩0</div>
+        </div>
+        <div class="form-group">
+          <label>비고</label>
+          <input type="text" id="supplyNotes" placeholder="구입 사유, 메모">
+        </div>
+        <div id="supplyFormError" class="error-msg" style="display:none"></div>
+        <button id="supplySubmitBtn" class="btn btn-primary btn-full" onclick="submitSupplyPurchase()">등록하기</button>
+        <button id="supplyCancelEditBtn" class="btn btn-outline btn-full"
+                style="display:none;margin-top:8px" onclick="cancelSupplyEdit()">수정 취소</button>
+      </div>
+
+      <!-- 월별 요약 -->
+      <div class="card">
+        <div class="summary-header">
+          <h2 class="card-title">월별 현황</h2>
+          <input type="month" id="supplyMonth" onchange="loadSupplyDashboard()"
+                 style="padding:6px 10px;border:1.5px solid var(--border);border-radius:var(--radius);font-size:13px">
+        </div>
+        <div id="supplyBudgetBox"></div>
+        <div class="total-box">
+          <div class="total-label">총 구매금액</div>
+          <div class="total-amount" id="supplyTotal">₩0</div>
+          <div class="total-count"  id="supplyCount">0건</div>
+        </div>
+        <div id="supplyCatSummary"></div>
+      </div>
+    </div>
+
+    <!-- 구매 목록 -->
+    <div class="card mt-16">
+      <div class="summary-header">
+        <h2 class="card-title">구매 목록</h2>
+        <button class="btn btn-sm btn-success" onclick="exportSupply('month')">엑셀 내보내기</button>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>날짜</th><th>카테고리</th><th>품목명</th>
+              <th>수량</th><th>단가</th><th>금액</th><th>비고</th><th>관리</th>
+            </tr>
+          </thead>
+          <tbody id="supplyBody"></tbody>
+        </table>
+      </div>
+      <div id="supplyEmpty" class="empty-msg" style="display:none">등록된 구매 내역이 없습니다.</div>
+    </div>
+  </div>
+
+  <!-- ── 구매 이력 ── -->
+  <div class="coupon-sub-content" id="supply-sub-shist">
+    <div class="card">
+      <div class="filter-row">
+        <div class="filter-group">
+          <label>시작일</label>
+          <input type="date" id="supHistStart">
+        </div>
+        <div class="filter-group">
+          <label>종료일</label>
+          <input type="date" id="supHistEnd">
+        </div>
+        <div class="filter-group">
+          <label>카테고리</label>
+          <select id="supHistCat"><option value="">전체</option></select>
+        </div>
+        <button class="btn btn-primary" onclick="loadSupplyHistory()">조회</button>
+        <button class="btn btn-success" onclick="exportSupply('history')">엑셀 내보내기</button>
+      </div>
+    </div>
+    <div class="card mt-16">
+      <div id="supHistSummary" class="hist-summary" style="display:none">
+        <div class="hist-sum-item"><span>총 구매금액</span><strong id="supHistTotal">₩0</strong></div>
+        <div class="hist-sum-item"><span>건수</span><strong id="supHistCount">0건</strong></div>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>날짜</th><th>카테고리</th><th>품목명</th>
+              <th>수량</th><th>단가</th><th>금액</th><th>비고</th>
+            </tr>
+          </thead>
+          <tbody id="supHistBody"></tbody>
+        </table>
+      </div>
+      <div id="supHistEmpty" class="empty-msg" style="display:none">조회된 구매 내역이 없습니다.</div>
+    </div>
+  </div>
+
+  <!-- ── 통계 ── -->
+  <div class="coupon-sub-content" id="supply-sub-sstats">
+    <div class="stats-grid">
+      <div class="card">
+        <h2 class="card-title">월별 구매금액 추이</h2>
+        <canvas id="supplyMonthChart"></canvas>
+      </div>
+      <div class="card">
+        <h2 class="card-title">카테고리별 구매금액</h2>
+        <canvas id="supplyCatChart"></canvas>
+      </div>
+    </div>
+    <div class="card mt-16">
+      <h2 class="card-title">자주 구매한 품목 TOP 10</h2>
+      <div id="supplyTopItems"></div>
+    </div>
+  </div>
+
+  <!-- ── 설정 ── -->
+  <div class="coupon-sub-content" id="supply-sub-sconfig">
+    <div class="dashboard-grid">
+
+      <!-- 카테고리 관리 -->
+      <div class="card">
+        <h2 class="card-title">카테고리 관리</h2>
+        <div style="display:flex;gap:8px;margin-bottom:16px">
+          <input type="text" id="newCatName" placeholder="카테고리명"
+                 style="flex:1;padding:9px 12px;border:1.5px solid var(--border);border-radius:var(--radius)">
+          <input type="color" id="newCatColor" value="#2e7d32"
+                 style="width:44px;height:40px;border:1.5px solid var(--border);border-radius:var(--radius);padding:2px;cursor:pointer">
+          <button class="btn btn-primary btn-sm" onclick="addSupplyCategory()">추가</button>
+        </div>
+        <div id="supplyCatList"></div>
+      </div>
+
+      <!-- 월 예산 설정 -->
+      <div class="card">
+        <h2 class="card-title">월 예산 설정</h2>
+        <p style="font-size:13px;color:var(--text-sub);margin-bottom:16px">
+          월별 비품 예산을 설정하면 현황 탭에서 예산 대비 진행률을 확인할 수 있습니다.
+        </p>
+        <div class="form-group">
+          <label>월 선택</label>
+          <input type="month" id="budgetMonth"
+                 style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:var(--radius);font-size:14px">
+        </div>
+        <div class="form-group">
+          <label>예산 (원)</label>
+          <input type="text" id="budgetAmount" placeholder="0" inputmode="numeric"
+                 oninput="formatBudgetInput()" class="input-amount">
+        </div>
+        <button class="btn btn-primary btn-full" onclick="saveBudget()">예산 저장</button>
+      </div>
+    </div>
   </div>
 
 </section>
