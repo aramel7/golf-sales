@@ -1,15 +1,17 @@
 const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const bcrypt = require('bcrypt');
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
-app.use(express.static('public'));
+app.use(express.static(path.join(__dirname, 'public')));
 
 const db = new sqlite3.Database('./database.db');
 
+// DB 초기화 + 관리자 생성
 db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS users (
@@ -31,11 +33,15 @@ db.serialize(() => {
   });
 });
 
+// 로그인 API
 app.post('/login', (req, res) => {
   const { username, password } = req.body;
 
   db.get(`SELECT * FROM users WHERE username = ?`, [username], async (err, user) => {
-    if (err) return res.json({ success: false });
+    if (err) {
+      console.log('❌ DB 에러:', err);
+      return res.status(500).json({ success: false });
+    }
 
     if (!user) {
       return res.json({ success: false, message: '아이디 없음' });
@@ -51,6 +57,7 @@ app.post('/login', (req, res) => {
   });
 });
 
+// 서버 실행
 app.listen(PORT, () => {
-  console.log(`서버 실행됨 👉 ${PORT}`);
+  console.log(`🚀 서버 실행됨 👉 ${PORT}`);
 });
