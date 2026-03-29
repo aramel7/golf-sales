@@ -125,10 +125,10 @@ app.post('/api/sales', auth, async (req, res) => {
     if (!date || !room_number || !payment_method || !amount) {
       return res.status(400).json({ error: '필수 항목을 모두 입력하세요' });
     }
-    if (room_number < 1 || room_number > 8) {
-      return res.status(400).json({ error: '방 번호는 1~8 사이여야 합니다' });
+    if (room_number < 1 || room_number > 9) {
+      return res.status(400).json({ error: '올바른 방을 선택하세요' });
     }
-    if (!['card', 'cash', 'transfer'].includes(payment_method)) {
+    if (!['card', 'cash', 'transfer', 'prepay'].includes(payment_method)) {
       return res.status(400).json({ error: '올바른 결제수단을 선택하세요' });
     }
     if (amount <= 0) {
@@ -183,9 +183,10 @@ app.get('/api/stats', auth, async (req, res) => {
       pool.query(`
         SELECT date::text,
           COALESCE(SUM(amount),0)::int AS total,
-          COALESCE(SUM(CASE WHEN payment_method='card' THEN amount ELSE 0 END),0)::int AS card_total,
-          COALESCE(SUM(CASE WHEN payment_method='cash' THEN amount ELSE 0 END),0)::int AS cash_total,
+          COALESCE(SUM(CASE WHEN payment_method='card'     THEN amount ELSE 0 END),0)::int AS card_total,
+          COALESCE(SUM(CASE WHEN payment_method='cash'     THEN amount ELSE 0 END),0)::int AS cash_total,
           COALESCE(SUM(CASE WHEN payment_method='transfer' THEN amount ELSE 0 END),0)::int AS transfer_total,
+          COALESCE(SUM(CASE WHEN payment_method='prepay'   THEN amount ELSE 0 END),0)::int AS prepay_total,
           COUNT(*)::int AS count
         FROM sales WHERE date BETWEEN $1 AND $2
         GROUP BY date ORDER BY date

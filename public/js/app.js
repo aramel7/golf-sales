@@ -129,9 +129,13 @@ function fmtTime(iso) {
   return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
 }
 
+function roomLabel(n) {
+  return n === 9 ? '기타' : `${n}번`;
+}
+
 function payBadge(p) {
-  const cls = { card: 'badge-card', cash: 'badge-cash', transfer: 'badge-transfer' }[p] || '';
-  const label = { card: '카드', cash: '현금', transfer: '계좌이체' }[p] || p;
+  const cls = { card: 'badge-card', cash: 'badge-cash', transfer: 'badge-transfer', prepay: 'badge-prepay' }[p] || '';
+  const label = { card: '카드', cash: '현금', transfer: '계좌이체', prepay: '선결제' }[p] || p;
   return `<span class="badge ${cls}">${label}</span>`;
 }
 
@@ -146,14 +150,15 @@ async function loadDashboard() {
 }
 
 function renderTodaySummary(rows) {
-  let total = 0, card = 0, cash = 0, transfer = 0;
+  let total = 0, card = 0, cash = 0, transfer = 0, prepay = 0;
   const roomMap = {};
 
   rows.forEach(r => {
     total += r.amount;
     if (r.payment_method === 'card') card += r.amount;
     else if (r.payment_method === 'cash') cash += r.amount;
-    else transfer += r.amount;
+    else if (r.payment_method === 'transfer') transfer += r.amount;
+    else if (r.payment_method === 'prepay') prepay += r.amount;
 
     if (!roomMap[r.room_number]) roomMap[r.room_number] = { total: 0, count: 0 };
     roomMap[r.room_number].total += r.amount;
@@ -165,6 +170,8 @@ function renderTodaySummary(rows) {
   document.getElementById('summaryCard').textContent = fmtWon(card);
   document.getElementById('summaryCash').textContent = fmtWon(cash);
   document.getElementById('summaryTransfer').textContent = fmtWon(transfer);
+  const prepayEl = document.getElementById('summaryPrepay');
+  if (prepayEl) prepayEl.textContent = fmtWon(prepay);
 
   const box = document.getElementById('roomSummary');
   if (Object.keys(roomMap).length === 0) {
@@ -175,7 +182,7 @@ function renderTodaySummary(rows) {
     .sort((a, b) => a[0] - b[0])
     .map(([room, d]) => `
       <div class="room-sum-item">
-        <span class="room-sum-name">${room}번</span>
+        <span class="room-sum-name">${roomLabel(parseInt(room))}</span>
         <div style="text-align:right">
           <div class="room-sum-amount">${fmtWon(d.total)}</div>
           <div class="room-sum-count">${d.count}건</div>
@@ -197,7 +204,7 @@ function renderTodayTable(rows) {
   tbody.innerHTML = rows.map(r => `
     <tr>
       <td>${fmtTime(r.created_at)}</td>
-      <td><strong>${r.room_number}번</strong></td>
+      <td><strong>${roomLabel(r.room_number)}</strong></td>
       <td>${payBadge(r.payment_method)}</td>
       <td class="amount-cell">${fmtWon(r.amount)}</td>
       <td style="color:var(--text-sub)">${r.memo || '-'}</td>
@@ -297,6 +304,90 @@ async function deleteSale(id) {
 }
 
 // ─── 매출내역 탭 ──────────────────────────────────
+let histViewMode = 'detail';
+
+function setHistView(mode) {
+  histViewMode = mode;
+  document.getElementById('hvDetail').className  = `btn btn-sm ${mode === 'detail'  ? 'btn-primary' : 'btn-outline'}`;
+  document.getElementById('hvDaily').className   = `btn btn-sm ${mode === 'daily'   ? 'btn-primary' : 'btn-outline'}`;
+  document.getElementById('hvMonthly').className = `btn btn-sm ${mode === 'monthly' ? 'btn-primary' : 'btn-outline'}`;
+  if (window._historyData) renderHistory(window._historyData);
+}
+
+function renderHistory(rows) {
+  const tbody = document.getElementById('histBody');
+  const thead = document.getElementById('histTableHead');
+  const empty = document.getElementById('histEmpty');
+
+  if (rows.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+
+  if (histViewMode === 'detail') {
+    if (thead) thead.innerHTML = `<tr><th>날짜</th><th>시간</th><th>방</th><th>결제</th><th>금액</th><th>메모</th></tr>`;
+    tbody.innerHTML = rows.map(r => `
+      <tr>
+        <td>${r.date}</td>
+        <td>${fmtTime(r.created_at)}</td>
+        <td><strong>${roomLabel(r.room_number)}</strong></td>
+        <td>${payBadge(r.payment_method)}</td>
+        <td class="amount-cell">${fmtWon(r.amount)}</td>
+        <td style="color:var(--text-sub)">${r.memo || '-'}</td>
+      </tr>
+    `).join('');
+  } else if (histViewMode === 'daily') {
+    if (thead) thead.innerHTML = `<tr><th>날짜</th><th>건수</th><th>카드</th><th>현금</th><th>계좌이체</th><th>선결제</th><th>합계</th></tr>`;
+    const map = {};
+    rows.forEach(r => {
+      if (!map[r.date]) map[r.date] = { count:0, card:0, cash:0, transfer:0, prepay:0, total:0 };
+      map[r.date].count++;
+      map[r.date].total += r.amount;
+      if (r.payment_method === 'card') map[r.date].card += r.amount;
+      else if (r.payment_method === 'cash') map[r.date].cash += r.amount;
+      else if (r.payment_method === 'transfer') map[r.date].transfer += r.amount;
+      else if (r.payment_method === 'prepay') map[r.date].prepay += r.amount;
+    });
+    tbody.innerHTML = Object.entries(map).sort((a,b) => a[0].localeCompare(b[0])).map(([date, d]) => `
+      <tr>
+        <td>${date}</td>
+        <td>${d.count}건</td>
+        <td class="amount-cell">${fmtWon(d.card)}</td>
+        <td class="amount-cell">${fmtWon(d.cash)}</td>
+        <td class="amount-cell">${fmtWon(d.transfer)}</td>
+        <td class="amount-cell">${fmtWon(d.prepay)}</td>
+        <td class="amount-cell"><strong>${fmtWon(d.total)}</strong></td>
+      </tr>
+    `).join('');
+  } else if (histViewMode === 'monthly') {
+    if (thead) thead.innerHTML = `<tr><th>월</th><th>건수</th><th>카드</th><th>현금</th><th>계좌이체</th><th>선결제</th><th>합계</th></tr>`;
+    const map = {};
+    rows.forEach(r => {
+      const month = r.date.slice(0, 7);
+      if (!map[month]) map[month] = { count:0, card:0, cash:0, transfer:0, prepay:0, total:0 };
+      map[month].count++;
+      map[month].total += r.amount;
+      if (r.payment_method === 'card') map[month].card += r.amount;
+      else if (r.payment_method === 'cash') map[month].cash += r.amount;
+      else if (r.payment_method === 'transfer') map[month].transfer += r.amount;
+      else if (r.payment_method === 'prepay') map[month].prepay += r.amount;
+    });
+    tbody.innerHTML = Object.entries(map).sort((a,b) => a[0].localeCompare(b[0])).map(([month, d]) => `
+      <tr>
+        <td>${month}</td>
+        <td>${d.count}건</td>
+        <td class="amount-cell">${fmtWon(d.card)}</td>
+        <td class="amount-cell">${fmtWon(d.cash)}</td>
+        <td class="amount-cell">${fmtWon(d.transfer)}</td>
+        <td class="amount-cell">${fmtWon(d.prepay)}</td>
+        <td class="amount-cell"><strong>${fmtWon(d.total)}</strong></td>
+      </tr>
+    `).join('');
+  }
+}
+
 async function loadHistory() {
   const start = document.getElementById('histStart').value;
   const end = document.getElementById('histEnd').value;
@@ -306,12 +397,13 @@ async function loadHistory() {
   if (!res) return;
   const rows = await res.json();
 
-  let total = 0, card = 0, cash = 0, transfer = 0;
+  let total = 0, card = 0, cash = 0, transfer = 0, prepay = 0;
   rows.forEach(r => {
     total += r.amount;
     if (r.payment_method === 'card') card += r.amount;
     else if (r.payment_method === 'cash') cash += r.amount;
-    else transfer += r.amount;
+    else if (r.payment_method === 'transfer') transfer += r.amount;
+    else if (r.payment_method === 'prepay') prepay += r.amount;
   });
 
   const box = document.getElementById('histSummaryBox');
@@ -321,37 +413,21 @@ async function loadHistory() {
   document.getElementById('histCash').textContent = fmtWon(cash);
   document.getElementById('histTransfer').textContent = fmtWon(transfer);
   document.getElementById('histCount').textContent = `${rows.length}건`;
-
-  const tbody = document.getElementById('histBody');
-  const empty = document.getElementById('histEmpty');
-  if (rows.length === 0) {
-    tbody.innerHTML = '';
-    empty.style.display = 'block';
-    return;
-  }
-  empty.style.display = 'none';
-  tbody.innerHTML = rows.map(r => `
-    <tr>
-      <td>${r.date}</td>
-      <td>${fmtTime(r.created_at)}</td>
-      <td><strong>${r.room_number}번</strong></td>
-      <td>${payBadge(r.payment_method)}</td>
-      <td class="amount-cell">${fmtWon(r.amount)}</td>
-      <td style="color:var(--text-sub)">${r.memo || '-'}</td>
-    </tr>
-  `).join('');
+  const prepayEl = document.getElementById('histPrepay');
+  if (prepayEl) prepayEl.textContent = fmtWon(prepay);
 
   window._historyData = rows;
+  renderHistory(rows);
 }
 
 // ─── 엑셀 내보내기 ────────────────────────────────
 function buildWorksheet(rows) {
   const headers = ['날짜', '시간', '방', '결제수단', '금액(원)', '메모'];
-  const payLabel = { card: '카드', cash: '현금', transfer: '계좌이체' };
+  const payLabel = { card: '카드', cash: '현금', transfer: '계좌이체', prepay: '선결제' };
   const data = rows.map(r => [
     r.date,
     new Date(r.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }),
-    `${r.room_number}번`,
+    roomLabel(r.room_number),
     payLabel[r.payment_method] || r.payment_method,
     r.amount,
     r.memo || ''
@@ -423,7 +499,8 @@ function renderDailyChart(daily) {
       datasets: [
         { label: '카드',     data: daily.map(d => d.card_total),     backgroundColor: '#1e88e5', stack: 's' },
         { label: '현금',     data: daily.map(d => d.cash_total),     backgroundColor: '#fb8c00', stack: 's' },
-        { label: '계좌이체', data: daily.map(d => d.transfer_total), backgroundColor: '#8e24aa', stack: 's' }
+        { label: '계좌이체', data: daily.map(d => d.transfer_total), backgroundColor: '#8e24aa', stack: 's' },
+        { label: '선결제',   data: daily.map(d => d.prepay_total || 0), backgroundColor: '#00838f', stack: 's' }
       ]
     },
     options: {
@@ -443,8 +520,8 @@ function renderDailyChart(daily) {
 function renderPaymentChart(payments) {
   const ctx = document.getElementById('paymentChart').getContext('2d');
   if (paymentChart) paymentChart.destroy();
-  const map = { card: '카드', cash: '현금', transfer: '계좌이체' };
-  const colors = { card: '#1e88e5', cash: '#fb8c00', transfer: '#8e24aa' };
+  const map = { card: '카드', cash: '현금', transfer: '계좌이체', prepay: '선결제' };
+  const colors = { card: '#1e88e5', cash: '#fb8c00', transfer: '#8e24aa', prepay: '#00838f' };
   paymentChart = new Chart(ctx, {
     type: 'doughnut',
     data: {
@@ -471,7 +548,7 @@ function renderRoomChart(rooms) {
   roomChart = new Chart(ctx, {
     type: 'bar',
     data: {
-      labels: rooms.map(r => `${r.room_number}번`),
+      labels: rooms.map(r => roomLabel(r.room_number)),
       datasets: [{
         label: '매출',
         data: rooms.map(r => r.total),
@@ -517,7 +594,7 @@ function renderStatsSummary(data) {
     </div>
     <div class="stats-sum-row">
       <span class="stats-sum-label">매출 1위 방</span>
-      <span class="stats-sum-value">${topRoom ? `${topRoom.room_number}번 방 (${fmtWon(topRoom.total)})` : '-'}</span>
+      <span class="stats-sum-value">${topRoom ? `${roomLabel(topRoom.room_number)} (${fmtWon(topRoom.total)})` : '-'}</span>
     </div>
   `;
 }

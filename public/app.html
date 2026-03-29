@@ -59,6 +59,7 @@
           <button class="room-btn" data-room="6">6번</button>
           <button class="room-btn" data-room="7">7번</button>
           <button class="room-btn" data-room="8">8번</button>
+          <button class="room-btn" data-room="9">기타</button>
         </div>
       </div>
 
@@ -68,6 +69,7 @@
           <button class="payment-btn" data-pay="card">💳 카드</button>
           <button class="payment-btn" data-pay="cash">💵 현금</button>
           <button class="payment-btn" data-pay="transfer">🏦 계좌이체</button>
+          <button class="payment-btn" data-pay="prepay">⏰ 선결제</button>
         </div>
       </div>
 
@@ -111,6 +113,10 @@
         <div class="pay-row">
           <span class="pay-label transfer-label">🏦 계좌이체</span>
           <span class="pay-amount" id="summaryTransfer">₩0</span>
+        </div>
+        <div class="pay-row">
+          <span class="pay-label prepay-label">⏰ 선결제</span>
+          <span class="pay-amount" id="summaryPrepay">₩0</span>
         </div>
       </div>
 
@@ -160,6 +166,14 @@
       </div>
       <button class="btn btn-primary" onclick="loadHistory()">조회</button>
       <button class="btn btn-success" onclick="exportHistory()">엑셀 내보내기</button>
+      <div class="filter-group">
+        <label>보기 방식</label>
+        <div style="display:flex;gap:4px">
+          <button id="hvDetail"  class="btn btn-sm btn-primary" onclick="setHistView('detail')">개별</button>
+          <button id="hvDaily"   class="btn btn-sm btn-outline" onclick="setHistView('daily')">일별</button>
+          <button id="hvMonthly" class="btn btn-sm btn-outline" onclick="setHistView('monthly')">월별</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -169,19 +183,16 @@
       <div class="hist-sum-item card-label"><span>카드</span><strong id="histCard">₩0</strong></div>
       <div class="hist-sum-item cash-label"><span>현금</span><strong id="histCash">₩0</strong></div>
       <div class="hist-sum-item transfer-label"><span>계좌이체</span><strong id="histTransfer">₩0</strong></div>
+      <div class="hist-sum-item prepay-label"><span>선결제</span><strong id="histPrepay">₩0</strong></div>
       <div class="hist-sum-item"><span>건수</span><strong id="histCount">0건</strong></div>
     </div>
 
     <div class="table-wrap">
       <table class="data-table">
-        <thead>
+        <thead id="histTableHead">
           <tr>
-            <th>날짜</th>
-            <th>시간</th>
-            <th>방</th>
-            <th>결제수단</th>
-            <th>금액</th>
-            <th>메모</th>
+            <th>날짜</th><th>시간</th><th>방</th>
+            <th>결제수단</th><th>금액</th><th>메모</th>
           </tr>
         </thead>
         <tbody id="histBody"></tbody>
