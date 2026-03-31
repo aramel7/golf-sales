@@ -6,7 +6,7 @@ const path = require('path');
 const { pool, initDB } = require('./db');
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '5mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ─── 인증 미들웨어 ───────────────────────────────────────────
@@ -500,6 +500,47 @@ app.get('/api/supply/stats', auth, async (_req, res) => {
     ]);
     res.json({ monthly, byCat, topItems });
   } catch (err) { console.error(err); res.status(500).json({ error: '통계 조회 실패' }); }
+});
+
+// ─── 공지사항 조회 ────────────────────────────────────────────
+app.get('/api/notices', auth, async (_req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM notices ORDER BY created_at DESC');
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '공지사항 조회 실패' });
+  }
+});
+
+// ─── 공지사항 등록 ────────────────────────────────────────────
+app.post('/api/notices', auth, async (req, res) => {
+  try {
+    const { author_name, content, image_data } = req.body;
+    if (!author_name || !content) {
+      return res.status(400).json({ error: '작성자와 내용을 입력하세요' });
+    }
+    const { rows } = await pool.query(
+      'INSERT INTO notices(author_name, content, image_data) VALUES($1,$2,$3) RETURNING *',
+      [author_name.trim(), content.trim(), image_data || '']
+    );
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '공지사항 등록 실패' });
+  }
+});
+
+// ─── 공지사항 삭제 ────────────────────────────────────────────
+app.delete('/api/notices/:id', auth, async (req, res) => {
+  try {
+    const { rowCount } = await pool.query('DELETE FROM notices WHERE id=$1', [req.params.id]);
+    if (!rowCount) return res.status(404).json({ error: '공지를 찾을 수 없습니다' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '공지사항 삭제 실패' });
+  }
 });
 
 // ─── 비품 예산 ───────────────────────────────────────────────

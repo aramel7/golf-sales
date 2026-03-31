@@ -10,6 +10,8 @@ let todayData = [];
 let dailyChart = null;
 let paymentChart = null;
 let roomChart = null;
+let noticePanelOpen = true;
+let noticeImageBase64 = '';
 
 // ─── 초기화 ───────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -50,6 +52,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 대시보드 로드
   loadDashboard();
+
+  // 공지사항 로드
+  loadNotices();
 });
 
 function updateHeaderDate() {
@@ -1418,4 +1423,179 @@ async function loadCouponStats() {
   }
 
   document.getElementById('couponStatsBody').innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════════
+// 공지사항
+// ═══════════════════════════════════════════════════
+
+async function loadNotices() {
+  try {
+    const res = await fetch('/api/notices', {
+      headers: { Authorization: 'Bearer ' + localStorage.getItem('token') }
+    });
+    const data = await res.json();
+    renderNotices(data);
+  } catch {
+    document.getElementById('noticeList').innerHTML =
+      '<div class="notice-empty">공지사항을 불러오지 못했습니다.</div>';
+  }
+}
+
+function renderNotices(notices) {
+  const list = document.getElementById('noticeList');
+  const badge = document.getElementById('noticeCount');
+
+  if (!notices.length) {
+    list.innerHTML = '<div class="notice-empty">등록된 공지사항이 없습니다.</div>';
+    badge.style.display = 'none';
+    return;
+  }
+
+  badge.textContent = notices.length;
+  badge.style.display = 'inline-block';
+
+  list.innerHTML = notices.map(n => {
+    const dt = new Date(n.created_at);
+    const dateStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} `
+      + `${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+    const imgHtml = n.image_data
+      ? `<img class="notice-img" src="${n.image_data}" alt="공지 이미지" onclick="openNoticeImageFull(this.src)">`
+      : '';
+    return `
+      <div class="notice-card" id="notice-${n.id}">
+        <div class="notice-card-header">
+          <div class="notice-meta">
+            <span class="notice-author-badge">✍️ ${escapeHtml(n.author_name)}</span>
+            <span class="notice-date">${dateStr}</span>
+          </div>
+          <button class="notice-del-btn" onclick="deleteNotice(${n.id})">🗑 삭제</button>
+        </div>
+        <div class="notice-content">${escapeHtml(n.content)}</div>
+        ${imgHtml}
+      </div>`;
+  }).join('');
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+            .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function toggleNoticePanel() {
+  noticePanelOpen = !noticePanelOpen;
+  const list = document.getElementById('noticeList');
+  const btn  = document.getElementById('noticeToggleBtn');
+  list.classList.toggle('collapsed', !noticePanelOpen);
+  btn.textContent = noticePanelOpen ? '▲ 접기' : '▼ 펼치기';
+}
+
+// ─── 공지 작성 모달 ───────────────────────────────
+function openNoticeModal() {
+  document.getElementById('noticeAuthor').value = localStorage.getItem('username') || '';
+  document.getElementById('noticeContent').value = '';
+  document.getElementById('noticeError').style.display = 'none';
+  clearNoticeImage();
+  document.getElementById('noticeModal').style.display = 'flex';
+  document.getElementById('noticeAuthor').focus();
+}
+
+function closeNoticeModal() {
+  document.getElementById('noticeModal').style.display = 'none';
+}
+
+function closeNoticeModalOnBg(e) {
+  if (e.target === document.getElementById('noticeModal')) closeNoticeModal();
+}
+
+function previewNoticeImage(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  resizeImageToBase64(file, 1200, 0.82, base64 => {
+    noticeImageBase64 = base64;
+    const preview = document.getElementById('noticeImgPreview');
+    document.getElementById('noticeImgPreviewImg').src = base64;
+    preview.style.display = 'block';
+  });
+}
+
+function clearNoticeImage() {
+  noticeImageBase64 = '';
+  document.getElementById('noticeImageInput').value = '';
+  document.getElementById('noticeImgPreview').style.display = 'none';
+  document.getElementById('noticeImgPreviewImg').src = '';
+}
+
+function resizeImageToBase64(file, maxPx, quality, callback) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      let w = img.width, h = img.height;
+      if (w > maxPx || h > maxPx) {
+        if (w > h) { h = Math.round(h * maxPx / w); w = maxPx; }
+        else       { w = Math.round(w * maxPx / h); h = maxPx; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      callback(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+async function submitNotice() {
+  const author  = document.getElementById('noticeAuthor').value.trim();
+  const content = document.getElementById('noticeContent').value.trim();
+  const errEl   = document.getElementById('noticeError');
+
+  if (!author)  { errEl.textContent = '작성자 이름을 입력하세요.'; errEl.style.display = 'block'; return; }
+  if (!content) { errEl.textContent = '공지 내용을 입력하세요.';   errEl.style.display = 'block'; return; }
+  errEl.style.display = 'none';
+
+  try {
+    const res = await fetch('/api/notices', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + localStorage.getItem('token')
+      },
+      body: JSON.stringify({ author_name: author, content, image_data: noticeImageBase64 })
+    });
+    if (!res.ok) {
+      const d = await res.json();
+      errEl.textContent = d.error || '등록 실패';
+      errEl.style.display = 'block';
+      return;
+    }
+    closeNoticeModal();
+    loadNotices();
+    if (!noticePanelOpen) toggleNoticePanel();
+  } catch {
+    errEl.textContent = '네트워크 오류가 발생했습니다.';
+    errEl.style.display = 'block';
+  }
+}
+
+async function deleteNotice(id) {
+  if (!confirm('이 공지사항을 삭제할까요?')) return;
+  try {
+    await fetch(`/api/notices/${id}`, {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer ' + localStorage.getItem('token') }
+    });
+    loadNotices();
+  } catch {
+    alert('삭제 실패');
+  }
+}
+
+function openNoticeImageFull(src) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:zoom-out;';
+  overlay.innerHTML = `<img src="${src}" style="max-width:95vw;max-height:95vh;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,.6)">`;
+  overlay.onclick = () => overlay.remove();
+  document.body.appendChild(overlay);
 }

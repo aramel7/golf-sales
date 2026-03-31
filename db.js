@@ -110,6 +110,17 @@ async function initDB() {
     )
   `);
 
+  // ─── 공지사항 테이블 ──────────────────────────────────────────
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS notices (
+      id          SERIAL PRIMARY KEY,
+      author_name VARCHAR(50)  NOT NULL,
+      content     TEXT         NOT NULL,
+      image_data  TEXT         DEFAULT '',
+      created_at  TIMESTAMP    DEFAULT NOW()
+    )
+  `);
+
   // 관리자 계정이 없으면 기본값으로 생성 (admin / golf1234)
   const { rows } = await pool.query('SELECT COUNT(*) FROM users');
   if (parseInt(rows[0].count) === 0) {

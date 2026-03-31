@@ -24,6 +24,24 @@
   </div>
 </header>
 
+<!-- ───── 공지사항 패널 ───── -->
+<div class="notice-panel" id="noticePanel">
+  <div class="notice-panel-header">
+    <div class="notice-panel-title">
+      <span class="notice-icon">📢</span>
+      <span>공지사항</span>
+      <span class="notice-count-badge" id="noticeCount" style="display:none"></span>
+    </div>
+    <div class="notice-panel-actions">
+      <button class="btn btn-sm notice-write-btn" onclick="openNoticeModal()">✏️ 공지 작성</button>
+      <button class="notice-toggle-btn" id="noticeToggleBtn" onclick="toggleNoticePanel()">▲ 접기</button>
+    </div>
+  </div>
+  <div class="notice-list" id="noticeList">
+    <div class="notice-loading" id="noticeLoading">불러오는 중...</div>
+  </div>
+</div>
+
 <!-- ───── 탭 내비게이션 ───── -->
 <nav class="app-nav">
   <button class="nav-tab active" data-tab="dashboard">📋 대시보드</button>
@@ -519,6 +537,39 @@
   </div>
 
 </section>
+
+<!-- ───── 공지사항 작성 모달 ───── -->
+<div id="noticeModal" class="modal-overlay" style="display:none" onclick="closeNoticeModalOnBg(event)">
+  <div class="modal-box" style="max-width:500px">
+    <h3>📢 공지사항 작성</h3>
+    <div class="form-group">
+      <label>작성자 이름 *</label>
+      <input type="text" id="noticeAuthor" placeholder="작성자 이름을 입력하세요">
+    </div>
+    <div class="form-group">
+      <label>내용 *</label>
+      <textarea id="noticeContent" placeholder="공지 내용을 입력하세요" rows="5"
+        style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:var(--radius);
+               font-family:inherit;font-size:14px;resize:vertical;outline:none;"></textarea>
+    </div>
+    <div class="form-group">
+      <label>사진 첨부 (선택)</label>
+      <label class="notice-img-upload-label" for="noticeImageInput">
+        📷 사진 선택
+      </label>
+      <input type="file" id="noticeImageInput" accept="image/*" style="display:none" onchange="previewNoticeImage(event)">
+      <div id="noticeImgPreview" style="display:none;margin-top:10px">
+        <img id="noticeImgPreviewImg" style="max-width:100%;max-height:200px;border-radius:8px;border:1.5px solid var(--border)">
+        <button onclick="clearNoticeImage()" style="display:block;margin-top:6px;background:var(--danger-light);color:var(--danger);border:1px solid #ef9a9a;border-radius:6px;padding:4px 10px;font-size:12px;font-weight:700;cursor:pointer;">🗑 사진 제거</button>
+      </div>
+    </div>
+    <div id="noticeError" class="error-msg" style="display:none"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeNoticeModal()">취소</button>
+      <button class="btn btn-primary" onclick="submitNotice()">공지 등록</button>
+    </div>
+  </div>
+</div>
 
 <!-- ───── 비밀번호 변경 모달 ───── -->
 <div id="pwModal" class="modal-overlay" style="display:none" onclick="closePwModalOnBg(event)">
